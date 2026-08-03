@@ -1,0 +1,14 @@
+{
+  "name": "tabletop-app",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "server"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace=server",
+    "dev:web": "npm run dev --workspace=web",
+    "dev:mobile": "npm run start --workspace=mobile"
+  }
+}

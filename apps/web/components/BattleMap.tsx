@@ -1,0 +1,370 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BattleMapState, Token, User, SIZE_SCALE, getContrastTextColor } from "shared";
+import ContextToolbar from "./ContextToolbar";
+import { resizeImageFile } from "../lib/resizeImage";
+
+interface Props {
+  battleMap: BattleMapState | null;
+  users: User[];
+  onSetMode: (mode: "grid" | "image") => void;
+  onSetImage: (imageDataUrl: string) => void;
+  onAddPlayerToken: (targetUserId: string) => void;
+  onAddCustomToken: (name: string, type: "monster" | "npc") => void;
+  onRemoveToken: (tokenId: string) => void;
+  onMoveToken: (tokenId: string, x: number, y: number, final?: boolean) => void;
+  onUpdateToken: (tokenId: string, changes: { color?: string; size?: string }) => void;
+}
+
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const BASE_TOKEN_SIZE = 34; // px, at "medium"
+
+export default function BattleMap({
+  battleMap,
+  users,
+  onSetMode,
+  onSetImage,
+  onAddPlayerToken,
+  onAddCustomToken,
+  onRemoveToken,
+  onMoveToken,
+  onUpdateToken,
+}: Props) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Selection is intentionally local-only React state — never sent over the
+  // socket, so each user can inspect a different token without affecting
+  // anyone else's screen.
+  const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
+  const [selectedPlayerId, setSelectedPlayerId] = useState("");
+  const [customName, setCustomName] = useState("");
+  const [customType, setCustomType] = useState<"monster" | "npc">("monster");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const draggingRef = useRef<{ tokenId: string; raf: number | null; lastPos: { x: number; y: number } | null } | null>(null);
+
+  const mode = battleMap?.mode ?? "grid";
+  const tokens = battleMap?.tokens ?? [];
+  const playerRefIds = new Set(tokens.filter((t) => t.type === "player").map((t) => t.refId));
+  const addablePlayers = users.filter((u) => !playerRefIds.has(u.id));
+  const selectedToken = tokens.find((t) => t.id === selectedTokenId) ?? null;
+
+  // If the selected token was removed (by this user or anyone else), clear
+  // the local selection — this is what makes another player's removal clear
+  // your toolbar automatically, with no server involvement.
+  useEffect(() => {
+    if (selectedTokenId && !tokens.some((t) => t.id === selectedTokenId)) {
+      setSelectedTokenId(null);
+    }
+  }, [tokens, selectedTokenId]);
+
+  // Escape closes the toolbar, per spec.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setSelectedTokenId(null);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    setUploadError(null);
+
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      setUploadError("Please choose a PNG, JPG, or WEBP image.");
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError("That image is too large — please use something under 5MB.");
+      return;
+    }
+    // Resized/compressed client-side before it's ever sent, so most uploads
+    // end up well under the cap even for large source photos.
+    resizeImageFile(file)
+      .then(onSetImage)
+      .catch(() => setUploadError("Couldn't process that image — please try again."));
+  }
+
+  const handlePointerMove = useCallback(
+    (clientX: number, clientY: number) => {
+      const drag = draggingRef.current;
+      const container = containerRef.current;
+      if (!drag || !container) return;
+      if (drag.raf) return; // throttle to one update per animation frame
+      drag.raf = requestAnimationFrame(() => {
+        drag.raf = null;
+        const rect = container.getBoundingClientRect();
+        const x = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+        const y = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100));
+        drag.lastPos = { x, y };
+        // Live update: broadcasts instantly for smooth movement, but is
+        // never written to disk (final=false) — only the position at the
+        // end of the drag is persisted. See server/index.js battlemap:moveToken.
+        onMoveToken(drag.tokenId, x, y, false);
+      });
+    },
+    [onMoveToken]
+  );
+
+  function startDrag(tokenId: string) {
+    draggingRef.current = { tokenId, raf: null, lastPos: null };
+    setSelectedTokenId(tokenId);
+
+    function onMouseMove(e: MouseEvent) {
+      handlePointerMove(e.clientX, e.clientY);
+    }
+    function onTouchMove(e: TouchEvent) {
+      const t = e.touches[0];
+      if (t) handlePointerMove(t.clientX, t.clientY);
+    }
+    function stop() {
+      const drag = draggingRef.current;
+      draggingRef.current = null;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", stop);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", stop);
+      // One final, persisted update with the position the token was
+      // actually released at — this is the only write that hits disk.
+      if (drag?.lastPos) {
+        onMoveToken(drag.tokenId, drag.lastPos.x, drag.lastPos.y, true);
+      }
+    }
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", stop);
+    window.addEventListener("touchmove", onTouchMove, { passive: true });
+    window.addEventListener("touchend", stop);
+  }
+
+  return (
+    <div className="wrap">
+      <div className="controls">
+        <div className="control-group">
+          <button className="ctrl-btn" onClick={() => fileInputRef.current?.click()}>Upload Map</button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={handleFileChange}
+            style={{ display: "none" }}
+          />
+          {mode === "image" && (
+            <button className="ctrl-btn" onClick={() => onSetMode("grid")}>Use Default Grid</button>
+          )}
+        </div>
+
+        <div className="control-group">
+          <select value={selectedPlayerId} onChange={(e) => setSelectedPlayerId(e.target.value)}>
+            <option value="">Add player token…</option>
+            {addablePlayers.map((u) => (
+              <option key={u.id} value={u.id}>{u.name}</option>
+            ))}
+          </select>
+          <button
+            className="ctrl-btn"
+            disabled={!selectedPlayerId}
+            onClick={() => {
+              if (selectedPlayerId) onAddPlayerToken(selectedPlayerId);
+              setSelectedPlayerId("");
+            }}
+          >
+            Add
+          </button>
+        </div>
+
+        <div className="control-group">
+          <input
+            placeholder="Monster/NPC name"
+            value={customName}
+            onChange={(e) => setCustomName(e.target.value)}
+            maxLength={40}
+          />
+          <select value={customType} onChange={(e) => setCustomType(e.target.value as "monster" | "npc")}>
+            <option value="monster">Monster</option>
+            <option value="npc">NPC</option>
+          </select>
+          <button
+            className="ctrl-btn"
+            disabled={!customName.trim()}
+            onClick={() => {
+              onAddCustomToken(customName.trim(), customType);
+              setCustomName("");
+            }}
+          >
+            Add
+          </button>
+        </div>
+      </div>
+
+      {uploadError && <p className="upload-error">{uploadError}</p>}
+
+      <div
+        ref={containerRef}
+        className="map-area"
+        onClick={() => setSelectedTokenId(null)}
+        style={mode === "image" && battleMap?.imageDataUrl ? { backgroundImage: `url(${battleMap.imageDataUrl})` } : undefined}
+      >
+        {mode === "grid" && <div className="grid-overlay" />}
+
+        {tokens.map((t: Token) => {
+          const scale = SIZE_SCALE[t.size] ?? 1;
+          const size = BASE_TOKEN_SIZE * scale;
+          return (
+            <div
+              key={t.id}
+              className={`token ${t.type} ${selectedTokenId === t.id ? "selected" : ""}`}
+              style={{
+                left: `${t.x}%`,
+                top: `${t.y}%`,
+                width: size,
+                height: size,
+                background: t.color,
+              }}
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                if (e.button !== 0) return; // only the primary button starts a drag
+                startDrag(t.id);
+              }}
+              onClick={(e) => {
+                // The browser fires a native "click" after mouseup even though
+                // mousedown already stopped its own propagation — without this,
+                // that click bubbles to the map area's onClick and immediately
+                // clears the selection this same interaction just set.
+                e.stopPropagation();
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault(); // show our toolbar instead of the browser's menu
+                e.stopPropagation();
+                setSelectedTokenId(t.id);
+              }}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                startDrag(t.id);
+              }}
+            >
+              <span className="token-inner" style={{ color: getContrastTextColor(t.color) }}>
+                {t.label.slice(0, 2).toUpperCase()}
+              </span>
+              <span className="token-label">{t.label}</span>
+            </div>
+          );
+        })}
+
+        {selectedToken && (
+          <div
+            className="toolbar-anchor"
+            style={{ left: `${selectedToken.x}%`, top: `${selectedToken.y}%` }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            <ContextToolbar
+              token={selectedToken}
+              onRemove={() => {
+                onRemoveToken(selectedToken.id);
+                setSelectedTokenId(null);
+              }}
+              onColorChange={(hex) => onUpdateToken(selectedToken.id, { color: hex })}
+              onSizeChange={(size) => onUpdateToken(selectedToken.id, { size })}
+            />
+          </div>
+        )}
+      </div>
+
+      <style jsx>{`
+        .wrap { display: flex; flex-direction: column; height: 100%; }
+        .controls {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          padding: 12px 16px;
+          border-bottom: 1px solid var(--rule);
+          background: var(--panel);
+        }
+        .control-group { display: flex; gap: 6px; align-items: center; }
+        .ctrl-btn {
+          background: var(--panel-raised);
+          border: 1px solid var(--gold);
+          color: var(--gold);
+          border-radius: 3px;
+          padding: 7px 12px;
+          font-family: var(--font-mono);
+          font-size: 11px;
+          white-space: nowrap;
+        }
+        .ctrl-btn:disabled { opacity: 0.4; }
+        .ctrl-btn:not(:disabled):hover { background: var(--gold); color: var(--ink); }
+        select, input {
+          background: var(--ink);
+          border: 1px solid var(--rule);
+          border-radius: 3px;
+          padding: 7px 8px;
+          color: var(--parchment);
+          font-size: 12px;
+          font-family: var(--font-body);
+        }
+        .upload-error { color: var(--crimson); font-size: 12px; padding: 6px 16px 0; margin: 0; }
+        .map-area {
+          position: relative;
+          flex: 1;
+          min-height: 320px;
+          background-color: var(--ink);
+          background-size: contain;
+          background-repeat: no-repeat;
+          background-position: center;
+          overflow: hidden;
+        }
+        .grid-overlay {
+          position: absolute;
+          inset: 0;
+          background-image:
+            repeating-linear-gradient(to right, rgba(236, 228, 211, 0.08) 0, rgba(236, 228, 211, 0.08) 1px, transparent 1px, transparent 2%),
+            repeating-linear-gradient(to bottom, rgba(236, 228, 211, 0.08) 0, rgba(236, 228, 211, 0.08) 1px, transparent 1px, transparent 2%);
+        }
+        .token {
+          position: absolute;
+          transform: translate(-50%, -50%);
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: grab;
+          border: 2px solid var(--ink);
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+          user-select: none;
+          touch-action: none;
+        }
+        .token.monster, .token.npc { border-radius: 6px; }
+        .token.selected { outline: 2px solid var(--gold); outline-offset: 2px; }
+        .token-inner {
+          font-family: var(--font-mono);
+          font-size: 11px;
+          font-weight: 700;
+          pointer-events: none;
+        }
+        .token-label {
+          position: absolute;
+          top: 100%;
+          margin-top: 4px;
+          font-family: var(--font-mono);
+          font-size: 10px;
+          color: var(--parchment);
+          background: rgba(22, 19, 32, 0.85);
+          padding: 1px 5px;
+          border-radius: 3px;
+          white-space: nowrap;
+          pointer-events: none;
+        }
+        .toolbar-anchor {
+          position: absolute;
+          transform: translate(-50%, 28px);
+          z-index: 10;
+        }
+      `}</style>
+    </div>
+  );
+}
