@@ -275,6 +275,14 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
   local dev server, by default) is allowed to call the server's API and
   real-time connection — configurable via `APP_ORIGIN` for deployment, never
   a wildcard. See the environment variables section below for details.
+- Search engine metadata (`apps/web/app/layout.tsx`, `robots.ts`, `sitemap.ts`,
+  `icon.tsx`, `opengraph-image.tsx`, `lib/siteConfig.ts`): a proper page
+  title and description, a canonical URL, Open Graph and Twitter-card tags
+  (so links shared in texts/Discord/etc. show a real title, description, and
+  preview image), a generated favicon, and `robots.txt`/`sitemap.xml` files
+  so Google can find and index the site. The one public production address
+  is defined once in `lib/siteConfig.ts` — update it there if the domain
+  ever changes.
 - Web app (Next.js) with a working chat panel + dice tray UI.
 - Mobile app (Expo) with the same functionality, native components.
 - **Not implemented yet**: voice/video calling, friends lists.
