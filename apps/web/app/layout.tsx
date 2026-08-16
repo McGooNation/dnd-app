@@ -32,6 +32,11 @@ export const metadata: Metadata = {
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
   },
+  // Proves ownership of the site to Google Search Console — this is the
+  // code from Search Console's "HTML tag" verification method.
+  verification: {
+    google: "rriF4M_KSoenhq9r3NbtDhflaOyOsY6f-cyFiyZxn-g",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
