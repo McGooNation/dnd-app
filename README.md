@@ -210,6 +210,16 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
   - Dragging a token only writes to disk **once**, when the drag ends —
     every intermediate frame still broadcasts live for smooth movement, but
     only the final position is persisted (and counts as activity).
+  - Real-time battle map sync sends only what actually changed: moving,
+    adding, removing, recoloring, or resizing a token broadcasts a small,
+    token-only message — never the map image or any other token. The full
+    map (including the image) is only ever sent when the map itself
+    actually changes (uploading one, switching grid/image mode), or once,
+    privately, to a player who just joined or reconnected. Chat, dice, and
+    initiative never touch the battle map broadcast at all. This is what
+    keeps dragging a token cheap on the network regardless of how large the
+    uploaded map is — see `server/index.js`'s `battlemap:token*` handlers
+    and the matching listeners in `packages/shared/src/useRealtimeRoom.ts`.
 - Invite links (`server/lobbyStore.js`, `apps/web/app/join/[code]/page.tsx`):
   - Every saved lobby gets a secure, random 10-character invite code
     (generated with Node's `crypto` module, not `Math.random`) the moment

@@ -156,21 +156,28 @@ function removeToken(state, tokenId) {
 }
 
 /** Moves a token. Coordinates are a percentage (0-100) of the play area in
- * both axes — see file header for why, and the plan's note on grid snapping. */
+ * both axes — see file header for why, and the plan's note on grid snapping.
+ * Returns the token (with its final, clamped position) so callers can
+ * broadcast exactly what was actually stored, or null if the token doesn't
+ * exist. */
 function moveToken(state, tokenId, x, y) {
   const token = state.tokens.find((t) => t.id === tokenId);
-  if (!token) return;
+  if (!token) return null;
   if (typeof x === "number" && !Number.isNaN(x)) token.x = Math.max(0, Math.min(100, x));
   if (typeof y === "number" && !Number.isNaN(y)) token.y = Math.max(0, Math.min(100, y));
+  return token;
 }
 
 /** Updates a token's color and/or size. Both are validated against the
  * known preset lists — never trust the client, same principle as dice rolls.
  * Structured to accept other future fields (see Token's reserved fields)
- * the same way without needing a new function per field. */
+ * the same way without needing a new function per field. Returns the token
+ * if something was actually changed (so callers can broadcast the real,
+ * validated values — never whatever the client merely requested), or null
+ * if the token doesn't exist or nothing valid was in `changes`. */
 function updateToken(state, tokenId, changes) {
   const token = state.tokens.find((t) => t.id === tokenId);
-  if (!token) return false;
+  if (!token) return null;
   let changed = false;
   if (typeof changes.color === "string" && PRESET_TOKEN_COLOR_HEXES.includes(changes.color)) {
     token.color = changes.color;
@@ -180,7 +187,7 @@ function updateToken(state, tokenId, changes) {
     token.size = changes.size;
     changed = true;
   }
-  return changed;
+  return changed ? token : null;
 }
 
 module.exports = {

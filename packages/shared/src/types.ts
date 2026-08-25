@@ -187,4 +187,12 @@ export interface ServerToClientEvents {
   "lobby:closed": (payload: { message: string }) => void;
   "initiative:state": (state: InitiativeState) => void;
   "battlemap:state": (state: BattleMapState) => void;
+  // Token-only updates — deliberately never include the map image or any
+  // other token, which is what keeps these small regardless of the
+  // uploaded map's size. See useRealtimeRoom.ts for how these patch local
+  // state incrementally rather than replacing the whole battle map.
+  "battlemap:tokenAdded": (payload: { token: Token }) => void;
+  "battlemap:tokenRemoved": (payload: { tokenId: string }) => void;
+  "battlemap:tokenMoved": (payload: { tokenId: string; x: number; y: number }) => void;
+  "battlemap:tokenUpdated": (payload: { tokenId: string; changes: Partial<Pick<Token, "color" | "size">> }) => void;
 }

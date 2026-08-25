@@ -310,15 +310,23 @@ function syncInitiative(room, roomId) {
   if (room.lobbyId) lobbyStore.saveInitiativeState(room.lobbyId, room.initiative);
 }
 
-/** Same idea as syncInitiative, for the battle map. `persist` defaults to
- * true — every existing caller keeps writing to disk exactly as before.
- * Live token-drag updates are the one case that passes persist=false, so
- * intermediate drag frames broadcast instantly but never touch the disk
- * (see battlemap:moveToken below) — only the final position, and every
- * other mutation, gets saved. */
-function syncBattleMap(room, roomId, persist = true) {
+/** Broadcasts the complete battle map (mode, image, every token) and saves
+ * it. Used only for genuine "the map itself changed" moments — switching
+ * the map mode or uploading/replacing the image — plus once, privately, to
+ * a player who just joined (see admitToRoom). Token-only changes (move,
+ * add, remove, recolor, resize) use the smaller, token-specific broadcasts
+ * below instead, so the full image is never retransmitted just because a
+ * token moved. */
+function syncBattleMap(room, roomId) {
   io.to(roomId).emit("battlemap:state", room.battleMap);
-  if (persist && room.lobbyId) lobbyStore.saveBattleMapState(room.lobbyId, room.battleMap);
+  persistBattleMap(room);
+}
+
+/** Saves the battle map without broadcasting anything — used by the
+ * token-specific handlers below, which broadcast their own small,
+ * token-only message instead of the full battlemap:state. */
+function persistBattleMap(room) {
+  if (room.lobbyId) lobbyStore.saveBattleMapState(room.lobbyId, room.battleMap);
 }
 
 /** Resolves the caller's role for initiative purposes only. Falls back to
@@ -725,40 +733,54 @@ io.on("connection", (socket) => {
     if (!room || !checkBattleMapPermission(lobby, token)) return;
     const target = room.users.get(targetUserId);
     if (!target) return;
-    battleMap.addPlayerToken(room.battleMap, { refId: target.id, name: target.name, color: target.color });
-    syncBattleMap(room, roomId);
+    const newToken = battleMap.addPlayerToken(room.battleMap, { refId: target.id, name: target.name, color: target.color });
+    persistBattleMap(room);
+    io.to(roomId).emit("battlemap:tokenAdded", { token: newToken });
   });
 
   socket.on("battlemap:addCustomToken", ({ roomId, name, type, token }) => {
     const { room, lobby } = requireBattleMapPermission(roomId);
     if (!room || !checkBattleMapPermission(lobby, token) || !name) return;
-    battleMap.addCustomToken(room.battleMap, { name, type });
-    syncBattleMap(room, roomId);
+    const newToken = battleMap.addCustomToken(room.battleMap, { name, type });
+    persistBattleMap(room);
+    io.to(roomId).emit("battlemap:tokenAdded", { token: newToken });
   });
 
   socket.on("battlemap:removeToken", ({ roomId, tokenId, token }) => {
     const { room, lobby } = requireBattleMapPermission(roomId);
     if (!room || !checkBattleMapPermission(lobby, token)) return;
     battleMap.removeToken(room.battleMap, tokenId);
-    syncBattleMap(room, roomId);
+    persistBattleMap(room);
+    io.to(roomId).emit("battlemap:tokenRemoved", { tokenId });
   });
 
   socket.on("battlemap:moveToken", ({ roomId, tokenId, x, y, token, final }) => {
     const { room, lobby } = requireBattleMapPermission(roomId);
     if (!room || !checkBattleMapPermission(lobby, token)) return;
-    battleMap.moveToken(room.battleMap, tokenId, x, y);
+    const movedToken = battleMap.moveToken(room.battleMap, tokenId, x, y);
+    if (!movedToken) return;
     // Every intermediate frame during a drag broadcasts instantly for smooth
-    // real-time movement but is NOT written to disk — only the final
-    // position (sent once, when the drag ends) is persisted and counted as
-    // activity. This is what keeps dragging a token from hammering storage.
-    syncBattleMap(room, roomId, !!final);
+    // real-time movement — but only ever the token's own id/position, never
+    // the map image or any other token, which is what keeps dragging cheap
+    // on the network regardless of how large the uploaded map is. Disk
+    // writes stay exactly as before: only the final position (when the drag
+    // ends) is persisted and counted as activity — intermediate frames
+    // never touch the disk, same as before this change.
+    if (final) persistBattleMap(room);
+    io.to(roomId).emit("battlemap:tokenMoved", { tokenId, x: movedToken.x, y: movedToken.y });
   });
 
   socket.on("battlemap:updateToken", ({ roomId, tokenId, changes, token }) => {
     const { room, lobby } = requireBattleMapPermission(roomId);
     if (!room || !checkBattleMapPermission(lobby, token)) return;
-    battleMap.updateToken(room.battleMap, tokenId, changes || {});
-    syncBattleMap(room, roomId);
+    const updatedToken = battleMap.updateToken(room.battleMap, tokenId, changes || {});
+    if (!updatedToken) return;
+    persistBattleMap(room);
+    // Only the fields this event type can ever change — sent from the
+    // authoritative, validated token, never the client's raw request, so a
+    // rejected/invalid field (see battleMap.js) can never leak to other
+    // players as if it had been applied.
+    io.to(roomId).emit("battlemap:tokenUpdated", { tokenId, changes: { color: updatedToken.color, size: updatedToken.size } });
   });
 
   socket.on("disconnect", () => {

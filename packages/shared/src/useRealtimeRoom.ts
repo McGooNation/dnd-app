@@ -132,6 +132,32 @@ export function useRealtimeRoom({
     });
     socket.on("initiative:state", (state) => setInitiative(state));
     socket.on("battlemap:state", (state) => setBattleMap(state));
+    // Token-only updates patch just the one affected token in local state —
+    // the map image and every other token are left completely untouched,
+    // both on the wire (server never sends them for these events) and here
+    // (we never touch them either). This is the client-side half of what
+    // keeps token movement/add/remove/recolor/resize cheap regardless of
+    // how large the uploaded map is.
+    socket.on("battlemap:tokenAdded", ({ token }) => {
+      setBattleMap((prev) => {
+        if (!prev) return prev;
+        if (prev.tokens.some((t) => t.id === token.id)) return prev; // defensive: never duplicate
+        return { ...prev, tokens: [...prev.tokens, token] };
+      });
+    });
+    socket.on("battlemap:tokenRemoved", ({ tokenId }) => {
+      setBattleMap((prev) => (prev ? { ...prev, tokens: prev.tokens.filter((t) => t.id !== tokenId) } : prev));
+    });
+    socket.on("battlemap:tokenMoved", ({ tokenId, x, y }) => {
+      setBattleMap((prev) =>
+        prev ? { ...prev, tokens: prev.tokens.map((t) => (t.id === tokenId ? { ...t, x, y } : t)) } : prev
+      );
+    });
+    socket.on("battlemap:tokenUpdated", ({ tokenId, changes }) => {
+      setBattleMap((prev) =>
+        prev ? { ...prev, tokens: prev.tokens.map((t) => (t.id === tokenId ? { ...t, ...changes } : t)) } : prev
+      );
+    });
 
     return () => {
       socket.emit("room:leave", { roomId });
