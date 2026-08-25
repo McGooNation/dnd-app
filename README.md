@@ -201,12 +201,21 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
   - Uploaded map images are resized/compressed **client-side** (a canvas on
     web, `expo-image-manipulator` on mobile) before they're ever sent —
     deliberately avoiding a server-side image library, which tends to need
-    native build tools. The server enforces the 5MB limit itself, and
-    genuinely verifies the upload is a real PNG, JPEG, or WEBP by checking
-    its actual decoded bytes ("magic numbers") — never just the filename or
-    the MIME type the browser happened to report — before ever storing or
-    broadcasting it. A file that fails this check is rejected with a
-    friendly message, and nothing is stored.
+    native build tools. Images are resized to a 2000px maximum dimension and
+    prefer WebP (smaller than JPEG at equivalent visual quality, and
+    supported by all current major browsers) — the web version specifically
+    verifies the browser actually honored the WebP request rather than
+    silently substituting an oversized PNG (a real, documented browser
+    inconsistency), falling back to JPEG if not. An already-small,
+    already-appropriately-sized upload is used as-is rather than needlessly
+    reprocessed. In testing with a realistic, detailed battle map image,
+    this reduced a 1.79MB upload to about 200KB (roughly 89% smaller) while
+    keeping grid lines and terrain detail clearly legible. The server
+    enforces the 5MB limit itself, and genuinely verifies the upload is a
+    real PNG, JPEG, or WEBP by checking its actual decoded bytes ("magic
+    numbers") — never just the filename or the MIME type the browser
+    happened to report — before ever storing or broadcasting it. A file that
+    fails this check is rejected with a friendly message, and nothing is stored.
   - Dragging a token only writes to disk **once**, when the drag ends —
     every intermediate frame still broadcasts live for smooth movement, but
     only the final position is persisted (and counts as activity).

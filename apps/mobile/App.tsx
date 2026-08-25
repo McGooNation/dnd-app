@@ -1079,6 +1079,10 @@ function InitiativeModalContent({
 
 const MAX_UPLOAD_BASE64_LENGTH = 7_000_000; // ~5MB of image data, base64-encoded
 const MAX_UPLOAD_DIMENSION = 2000; // px, on the longer side — matches the web resize utility
+// If the original file is already at or under this size AND already within
+// MAX_UPLOAD_DIMENSION, it's used as-is rather than needlessly reprocessed —
+// matches the same idea in apps/web/lib/resizeImage.ts.
+const SKIP_PROCESSING_MAX_BYTES = 800 * 1024;
 
 function BattleMapView({
   battleMap,
@@ -1147,14 +1151,40 @@ function BattleMapView({
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 1, // manipulateAsync below handles the actual compression
+      base64: true, // only used for the "already small enough" fast path below
     });
     if (result.canceled || !result.assets?.[0]) return;
 
     const picked = result.assets[0];
+    const longerSide = Math.max(picked.width || 0, picked.height || 0);
+
+    // Already small and already appropriately sized — nothing meaningful to
+    // gain from resizing/recompressing it, and doing so anyway would just be
+    // unnecessary processing (plus a pointless generation loss if it's
+    // already a compressed format).
+    if (
+      typeof picked.fileSize === "number" &&
+      picked.fileSize <= SKIP_PROCESSING_MAX_BYTES &&
+      longerSide <= MAX_UPLOAD_DIMENSION &&
+      picked.base64
+    ) {
+      const mime = picked.mimeType && ["image/jpeg", "image/png", "image/webp"].includes(picked.mimeType) ? picked.mimeType : "image/jpeg";
+      const dataUrl = `data:${mime};base64,${picked.base64}`;
+      if (dataUrl.length > MAX_UPLOAD_BASE64_LENGTH) {
+        setUploadError("That image is too large — please use something under 5MB.");
+        return;
+      }
+      onSetImage(dataUrl);
+      return;
+    }
+
     // Resize (only if larger than the cap) and compress client-side —
     // same idea as the web canvas resize, done here via Expo's own image
-    // module so no server-side native image library is needed.
-    const longerSide = Math.max(picked.width || 0, picked.height || 0);
+    // module so no server-side native image library is needed. WebP is
+    // preferred (smaller than JPEG at equivalent quality, and — unlike the
+    // web canvas approach — expo-image-manipulator's WebP encoding is a
+    // native, first-class supported option, not something that needs a
+    // browser-compatibility fallback check).
     const resizeAction =
       longerSide > MAX_UPLOAD_DIMENSION
         ? [{ resize: picked.width >= picked.height ? { width: MAX_UPLOAD_DIMENSION } : { height: MAX_UPLOAD_DIMENSION } }]
@@ -1163,8 +1193,8 @@ function BattleMapView({
     let manipulated;
     try {
       manipulated = await ImageManipulator.manipulateAsync(picked.uri, resizeAction, {
-        compress: 0.8,
-        format: ImageManipulator.SaveFormat.JPEG,
+        compress: 0.85,
+        format: ImageManipulator.SaveFormat.WEBP,
         base64: true,
       });
     } catch {
@@ -1176,7 +1206,7 @@ function BattleMapView({
       return;
     }
 
-    const dataUrl = `data:image/jpeg;base64,${manipulated.base64}`;
+    const dataUrl = `data:image/webp;base64,${manipulated.base64}`;
     if (dataUrl.length > MAX_UPLOAD_BASE64_LENGTH) {
       setUploadError("That image is too large — please use something under 5MB.");
       return;
