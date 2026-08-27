@@ -150,6 +150,13 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
     **Selection itself is local to each user's screen and never sent over
     the socket** — everyone can inspect a different token at once without
     affecting anyone else.
+  - **"Show Token Names" toggle**: hides the full name label shown beneath
+    each token (useful when several tokens are clustered together), while
+    the initials shown *inside* the token are always kept — the toggle only
+    ever affects that one label element. Same as token selection, this is a
+    local, per-person display preference (never synced, resets to on if you
+    refresh) — turning it off doesn't touch the token's actual stored name
+    in any way, just whether that one label renders on your own screen.
   - **Remove from Map** asks for confirmation first, then removes the token
     from the board for everyone. It's not a permanent delete — a removed
     player can be re-added via "Add Player Token," a removed monster/NPC can

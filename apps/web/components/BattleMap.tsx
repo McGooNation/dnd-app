@@ -37,6 +37,11 @@ export default function BattleMap({
   // socket, so each user can inspect a different token without affecting
   // anyone else's screen.
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
+  // A display-only preference, kept local like token selection above (never
+  // sent over the socket) — this is a "how do I want MY screen decluttered"
+  // choice, not shared lobby data, so each person can set it independently.
+  // Defaults to on, matching the always-on behavior before this feature existed.
+  const [showTokenNames, setShowTokenNames] = useState(true);
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [customName, setCustomName] = useState("");
   const [customType, setCustomType] = useState<"monster" | "npc">("monster");
@@ -197,6 +202,16 @@ export default function BattleMap({
             Add
           </button>
         </div>
+        <div className="control-group">
+          <label className="toggle-label">
+            <input
+              type="checkbox"
+              checked={showTokenNames}
+              onChange={(e) => setShowTokenNames(e.target.checked)}
+            />
+            Show Token Names
+          </label>
+        </div>
       </div>
 
       {uploadError && <p className="upload-error">{uploadError}</p>}
@@ -248,7 +263,7 @@ export default function BattleMap({
               <span className="token-inner" style={{ color: getContrastTextColor(t.color) }}>
                 {t.label.slice(0, 2).toUpperCase()}
               </span>
-              <span className="token-label">{t.label}</span>
+              {showTokenNames && <span className="token-label">{t.label}</span>}
             </div>
           );
         })}
@@ -308,6 +323,17 @@ export default function BattleMap({
           font-family: var(--font-body);
         }
         .upload-error { color: var(--crimson); font-size: 12px; padding: 6px 16px 0; margin: 0; }
+        .toggle-label {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          color: var(--parchment-dim);
+          font-family: var(--font-mono);
+          font-size: 11px;
+          white-space: nowrap;
+          cursor: pointer;
+        }
+        .toggle-label input { cursor: pointer; }
         .map-area {
           position: relative;
           flex: 1;

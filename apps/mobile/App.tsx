@@ -1109,6 +1109,10 @@ function BattleMapView({
   // Selection is local-only React state — never sent over the socket, so
   // each user can inspect a different token without affecting anyone else.
   const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null);
+  // A display-only preference, kept local like token selection above (never
+  // sent over the socket) — each person can declutter their own screen
+  // independently. Defaults to on, matching prior always-on behavior.
+  const [showTokenNames, setShowTokenNames] = useState(true);
   const [customName, setCustomName] = useState("");
   const [customType, setCustomType] = useState<"monster" | "npc">("monster");
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -1225,6 +1229,9 @@ function BattleMapView({
             <Text style={styles.mapCtrlBtnText}>Use Default Grid</Text>
           </TouchableOpacity>
         )}
+        <TouchableOpacity style={styles.mapCtrlBtn} onPress={() => setShowTokenNames(!showTokenNames)}>
+          <Text style={styles.mapCtrlBtnText}>{showTokenNames ? "Hide Token Names" : "Show Token Names"}</Text>
+        </TouchableOpacity>
       </ScrollView>
       {uploadError && <Text style={styles.customError}>{uploadError}</Text>}
 
@@ -1285,6 +1292,7 @@ function BattleMapView({
             selected={selectedTokenId === t.id}
             onSelect={setSelectedTokenId}
             onMove={onMoveToken}
+            showLabel={showTokenNames}
           />
         ))}
 
@@ -1321,12 +1329,14 @@ function DraggableToken({
   selected,
   onSelect,
   onMove,
+  showLabel,
 }: {
   token: Token;
   containerSize: { width: number; height: number };
   selected: boolean;
   onSelect: (id: string) => void;
   onMove: (id: string, x: number, y: number, final?: boolean) => void;
+  showLabel: boolean;
 }) {
   // Refs, not closures, so the PanResponder (created once) always reads the
   // latest token position and container size instead of stale values.
@@ -1392,7 +1402,7 @@ function DraggableToken({
       <Text style={[styles.mapTokenInner, { color: getContrastTextColor(token.color) }]}>
         {token.label.slice(0, 2).toUpperCase()}
       </Text>
-      <Text style={styles.mapTokenLabel} numberOfLines={1}>{token.label}</Text>
+      {showLabel && <Text style={styles.mapTokenLabel} numberOfLines={1}>{token.label}</Text>}
     </View>
   );
 }
