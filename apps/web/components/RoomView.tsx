@@ -48,7 +48,6 @@ export default function RoomView({
     removePlayer,
     closeLobby,
     initiative,
-    setInitiativePanelOpen,
     addPlayerToInitiative,
     addCustomInitiativeEntry,
     removeInitiativeEntry,
@@ -72,6 +71,11 @@ export default function RoomView({
 
   const isOwner = !!accountId && !!room?.ownerId && accountId === room.ownerId;
   const [showInvite, setShowInvite] = useState(false);
+  // Whether THIS user's Initiative panel is open — deliberately local, never
+  // sent to the server. Each person opens/closes their own view of the
+  // (fully shared) initiative data independently; see server/initiative.js
+  // for where the actual shared data lives.
+  const [initiativePanelOpen, setInitiativePanelOpen] = useState(false);
   // A small, self-clearing toast for server-sent notices (e.g. rate limit
   // messages) — kept local to this component so it doesn't change how the
   // shared hook behaves for anything else.
@@ -204,8 +208,8 @@ export default function RoomView({
       <div className="body">
         <div className="col-left">
           <button
-            className={`initiative-btn ${initiative?.panelOpen ? "active" : ""}`}
-            onClick={() => setInitiativePanelOpen(!initiative?.panelOpen)}
+            className={`initiative-btn ${initiativePanelOpen ? "active" : ""}`}
+            onClick={() => setInitiativePanelOpen((prev) => !prev)}
           >
             Initiative{initiative?.active ? ` · Round ${initiative.round}` : ""}
           </button>
@@ -230,7 +234,7 @@ export default function RoomView({
       </div>
 
       <InitiativePanel
-        open={!!initiative?.panelOpen}
+        open={initiativePanelOpen}
         initiative={initiative}
         users={room?.users ?? []}
         onClose={() => setInitiativePanelOpen(false)}

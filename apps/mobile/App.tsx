@@ -496,7 +496,6 @@ function RoomScreen({
     removePlayer,
     closeLobby,
     initiative,
-    setInitiativePanelOpen,
     addPlayerToInitiative,
     addCustomInitiativeEntry,
     removeInitiativeEntry,
@@ -533,6 +532,10 @@ function RoomScreen({
   const [showInvite, setShowInvite] = useState(false);
 
   const isOwner = !!accountId && !!room?.ownerId && accountId === room.ownerId;
+  // Whether THIS user's Initiative panel is open — deliberately local, never
+  // sent to the server. Each person opens/closes their own view of the
+  // (fully shared) initiative data independently.
+  const [initiativePanelOpen, setInitiativePanelOpen] = useState(false);
   // A small, self-clearing toast for server-sent notices (e.g. rate limit
   // messages) — kept local to this component, mirroring the web app.
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -643,8 +646,8 @@ function RoomScreen({
           <TouchableOpacity onPress={() => setShowInvite(true)}>
             <Text style={styles.inviteBtnText}>Invite</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setInitiativePanelOpen(!initiative?.panelOpen)}>
-            <Text style={[styles.initiativeBtnText, initiative?.panelOpen && styles.initiativeBtnTextActive]}>
+          <TouchableOpacity onPress={() => setInitiativePanelOpen((prev) => !prev)}>
+            <Text style={[styles.initiativeBtnText, initiativePanelOpen && styles.initiativeBtnTextActive]}>
               Initiative{initiative?.active ? ` · R${initiative.round}` : ""}
             </Text>
           </TouchableOpacity>
@@ -663,7 +666,7 @@ function RoomScreen({
         />
       </Modal>
 
-      <Modal visible={!!initiative?.panelOpen} animationType="slide" transparent onRequestClose={() => setInitiativePanelOpen(false)}>
+      <Modal visible={initiativePanelOpen} animationType="slide" transparent onRequestClose={() => setInitiativePanelOpen(false)}>
         <InitiativeModalContent
           initiative={initiative}
           users={room?.users ?? []}

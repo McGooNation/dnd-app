@@ -175,6 +175,18 @@ export default function InitiativePanel({
           display: flex;
           flex-direction: column;
         }
+        /* Matches the breakpoint RoomView.tsx uses for its 30% / 47% / 23%
+         * three-column layout — only at this width does a fixed side panel
+         * risk overlapping the map, since below it the columns stack
+         * vertically instead of sitting side by side. Sized to match the
+         * existing right-hand chat column exactly, so the panel overlays
+         * only that area and never covers the map. Nothing below this
+         * breakpoint changes at all. */
+        @media (min-width: 1000px) {
+          .panel {
+            width: 23%;
+          }
+        }
         .panel.open { transform: translateX(0); }
         .panel-header {
           display: flex;

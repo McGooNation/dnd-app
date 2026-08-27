@@ -206,11 +206,6 @@ export function useRealtimeRoom({
     socketRef.current?.connect();
   }, []);
 
-  const setInitiativePanelOpen = useCallback(
-    (open: boolean) => socketRef.current?.emit("initiative:setPanelOpen", { roomId, open }),
-    [roomId]
-  );
-
   const addPlayerToInitiative = useCallback(
     (targetUserId: string) => socketRef.current?.emit("initiative:addPlayer", { roomId, targetUserId, token }),
     [roomId, token]
@@ -292,7 +287,6 @@ export function useRealtimeRoom({
     removePlayer,
     closeLobby,
     initiative,
-    setInitiativePanelOpen,
     addPlayerToInitiative,
     addCustomInitiativeEntry,
     removeInitiativeEntry,

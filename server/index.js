@@ -573,13 +573,6 @@ io.on("connection", (socket) => {
     return permissions.can(role, "manageInitiative");
   }
 
-  socket.on("initiative:setPanelOpen", ({ roomId, open }) => {
-    const room = rooms.get(roomId);
-    if (!room || !room.users.has(socket.id)) return;
-    room.initiative.panelOpen = !!open;
-    syncInitiative(room, roomId);
-  });
-
   socket.on("initiative:addPlayer", ({ roomId, targetUserId, token }) => {
     const { room, lobby } = requireInitiativePermission(roomId);
     if (!room || !checkInitiativePermission(lobby, token)) return;

@@ -2,7 +2,6 @@
 // This mutates and returns state objects shaped like:
 //
 // {
-//   panelOpen: boolean,
 //   active: boolean,            // has combat been started?
 //   round: number,               // 0 when not in combat
 //   currentTurnEntryId: string|null,  // tracked by id, not list position —
@@ -10,6 +9,11 @@
 //   entries: [ { id, type, refId, name, color, initiative, modifier, hp,
 //                maxHp, tempHp, conditions, notes } ]
 // }
+//
+// Note: whether each person's Initiative panel is currently open is a
+// local, per-client UI preference (see RoomView.tsx / App.tsx's own local
+// state) — it deliberately does NOT live here, so opening/closing it is
+// never synchronized between players, unlike everything else in this file.
 //
 // `modifier`, `hp`, `maxHp`, `tempHp`, `conditions`, `notes` exist on every
 // entry today but are unused — reserved so future features (Dexterity
@@ -19,7 +23,7 @@
 const { v4: uuid } = require("uuid");
 
 function defaultInitiativeState() {
-  return { panelOpen: false, active: false, round: 0, currentTurnEntryId: null, entries: [] };
+  return { active: false, round: 0, currentTurnEntryId: null, entries: [] };
 }
 
 /** Stable sort, highest initiative first. */

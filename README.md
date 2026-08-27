@@ -77,11 +77,21 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
     updating — see the comments at the bottom of `server/lobbyStore.js` for
     exactly how (short version: nothing is deleted, a backup of the old
     files is kept, and the process is safe to interrupt or re-run).
-- Collapsible Initiative Panel (`server/initiative.js`), synced live to
-  everyone in the lobby:
+- Collapsible Initiative Panel (`server/initiative.js`), with the actual
+  initiative data synced live to everyone in the lobby:
   - Toggle button lives in the left column (web) / header (mobile) and opens
-    a slide-out panel (web) / slide-up modal (mobile) — opening and closing
-    is synced for the whole lobby, not just locally.
+    a slide-out panel (web) / slide-up modal (mobile). **Opening and closing
+    the panel is local to each person** — like token selection, it's a
+    display preference, never sent over the socket, so everyone can have it
+    open or closed independently. The initiative *data* underneath (who's in
+    it, rolls, turn order, round, whose turn it is) is a completely separate
+    thing and stays fully synced regardless of who has their panel open.
+  - On desktop (matching the same ~1000px breakpoint the three-column layout
+    itself uses), the panel is sized to match the existing right-hand
+    Table Talk column, not a fixed pixel width — so it overlays only that
+    area and never covers the battle map. Below that breakpoint (narrow
+    screens, where the layout is already a single stacked column), sizing is
+    unchanged from before.
   - Add any currently-connected player, or a custom monster/NPC entry
     (name + initiative value) — multiple custom entries can share a name
     (e.g. "Goblin 1", "Goblin 2").

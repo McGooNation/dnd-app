@@ -98,7 +98,6 @@ export interface InitiativeEntry {
 }
 
 export interface InitiativeState {
-  panelOpen: boolean;
   active: boolean;
   round: number;
   currentTurnEntryId: string | null;
@@ -154,7 +153,6 @@ export interface ClientToServerEvents {
   "lobby:respondJoinRequest": (payload: { roomId: string; requestId: string; approve: boolean; token: string }) => void;
   "lobby:removePlayer": (payload: { roomId: string; targetUserId: string; token: string }) => void;
   "lobby:close": (payload: { roomId: string; token: string }) => void;
-  "initiative:setPanelOpen": (payload: { roomId: string; open: boolean }) => void;
   "initiative:addPlayer": (payload: { roomId: string; targetUserId: string; token?: string }) => void;
   "initiative:addCustom": (payload: { roomId: string; name: string; initiativeValue: number; token?: string }) => void;
   "initiative:removeEntry": (payload: { roomId: string; entryId: string; token?: string }) => void;
