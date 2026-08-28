@@ -801,9 +801,15 @@ function RoomScreen({
                 <View>
                   <Text style={[styles.rollWho, { color: item.user.color }]}>{item.user.name}</Text>
                   <Text style={styles.rollWhat}>
-                    {item.request.count > 1 ? item.request.count : ""}
-                    {item.request.diceType}
+                    {item.breakdown
+                      ? item.breakdown.map((g) => `${g.values.length > 1 ? g.values.length : ""}${g.diceType}`).join(" + ")
+                      : `${item.request.count > 1 ? item.request.count : ""}${item.request.diceType}`}
                   </Text>
+                  {item.breakdown && (
+                    <Text style={styles.rollWhat}>
+                      {item.breakdown.map((g) => `${g.diceType}: [${g.values.join(", ")}]`).join("  ")}
+                    </Text>
+                  )}
                 </View>
                 <Text style={styles.rollTotal}>{item.total}</Text>
               </View>

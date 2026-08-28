@@ -22,6 +22,21 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
   everyone in the room sees results live.
 - Shared dice engine supporting d4/d6/d8/d10/d12/d20/d100, custom dice of any
   size (e.g. d37), multiple dice, modifiers, and advantage/disadvantage.
+  - **Combining multiple different dice types in one roll** (e.g. "1d10 +
+    1d12", "2d6 + 1d8 + 3"): click "+ Add Die" in the dice tray to pin the
+    currently-selected die and pick another type for the roll — the Roll
+    button always shows the full combined formula. A normal single-type
+    roll (still the common case) is completely unaffected — this is purely
+    additive on top of the existing `diceType`/`count` request shape (a new
+    optional `extraDice` list), so old saved rolls and every existing dice
+    behavior render exactly as they did before. Results include a
+    per-die-type breakdown (only when more than one type was rolled) so
+    everyone can see exactly what each die showed, not just the total.
+    Advantage/disadvantage stays a single-d20 mechanic, as before — the
+    option only appears when there's just one die type selected.
+    Mobile currently displays multi-type rolls made by others correctly,
+    but building one is a web-only capability for now (mobile's dice tab
+    doesn't yet have the count/modifier controls this extends).
 - Email/password accounts, alongside guest access:
   - Register/login at `/auth/register` and `/auth/login`; a saved login session
     is restored automatically on the next visit (localStorage on web,

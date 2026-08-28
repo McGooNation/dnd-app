@@ -8,6 +8,11 @@ interface Props {
   onRoll: (request: RollRequest) => void;
 }
 
+// Matches MAX_DICE_GROUPS in packages/shared/src/dice.ts (server-authoritative
+// limit) — kept here only so the UI can stop offering "+ Add Die" before
+// hitting a limit the server would reject anyway, not as its own source of truth.
+const MAX_DICE_GROUPS = 10;
+
 export default function DiceTray({ rolls, onRoll }: Props) {
   const [diceType, setDiceType] = useState<DiceType>("d20");
   const [count, setCount] = useState(1);
@@ -15,8 +20,14 @@ export default function DiceTray({ rolls, onRoll }: Props) {
   const [mode, setMode] = useState<"normal" | "advantage" | "disadvantage">("normal");
   const [customSides, setCustomSides] = useState("");
   const [customError, setCustomError] = useState<string | null>(null);
+  // Dice groups already "added" to the current roll, on top of whichever
+  // die is currently selected above — e.g. building "1d10 + 1d12" means
+  // picking d10, clicking "+ Add Die" (which adds it here), then picking
+  // d12 as the still-active selection. Empty by default, so a normal single
+  // -die roll (the overwhelmingly common case) never involves this at all.
+  const [addedDice, setAddedDice] = useState<{ diceType: DiceType; count: number }[]>([]);
 
-  const isD20AdvEligible = diceType === "d20" && count === 1;
+  const isD20AdvEligible = diceType === "d20" && count === 1 && addedDice.length === 0;
 
   function applyCustomSides() {
     const n = parseInt(customSides, 10);
@@ -90,6 +101,42 @@ export default function DiceTray({ rolls, onRoll }: Props) {
           </label>
         </div>
 
+        {addedDice.length + 1 < MAX_DICE_GROUPS && (
+          <button
+            type="button"
+            className="add-die-btn"
+            onClick={() => {
+              setAddedDice((prev) => [...prev, { diceType, count }]);
+              setCount(1);
+            }}
+          >
+            + Add Die (combine with another type)
+          </button>
+        )}
+
+        {addedDice.length > 0 && (
+          <div className="added-dice-row">
+            {addedDice.map((d, i) => (
+              <span key={i} className="die-chip">
+                {d.count > 1 ? d.count : ""}
+                {d.diceType}
+                <button
+                  type="button"
+                  className="chip-remove"
+                  aria-label={`Remove ${d.count > 1 ? d.count : ""}${d.diceType}`}
+                  onClick={() => setAddedDice((prev) => prev.filter((_, idx) => idx !== i))}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+            <span className="die-chip current">
+              {count > 1 ? count : ""}
+              {diceType}
+            </span>
+          </div>
+        )}
+
         {isD20AdvEligible && (
           <div className="mode-row">
             {(["normal", "advantage", "disadvantage"] as const).map((m) => (
@@ -102,16 +149,17 @@ export default function DiceTray({ rolls, onRoll }: Props) {
 
         <button
           className="roll-btn"
-          onClick={() =>
+          onClick={() => {
             onRoll({
               diceType,
               count,
               modifier,
               mode: isD20AdvEligible ? mode : "normal",
-            })
-          }
+              extraDice: addedDice.length > 0 ? addedDice : undefined,
+            });
+          }}
         >
-          Roll {count > 1 ? count : ""}{diceType}
+          Roll {[...addedDice, { diceType, count }].map((d) => `${d.count > 1 ? d.count : ""}${d.diceType}`).join(" + ")}
           {modifier ? (modifier > 0 ? ` +${modifier}` : ` ${modifier}`) : ""}
         </button>
       </div>
@@ -125,15 +173,20 @@ export default function DiceTray({ rolls, onRoll }: Props) {
               <div className="roll-meta">
                 <span className="who" style={{ color: r.user.color }}>{r.user.name}</span>
                 <span className="what">
-                  {r.request.count > 1 ? r.request.count : ""}
-                  {r.request.diceType}
+                  {r.breakdown
+                    ? r.breakdown.map((g) => `${g.values.length > 1 ? g.values.length : ""}${g.diceType}`).join(" + ")
+                    : `${r.request.count > 1 ? r.request.count : ""}${r.request.diceType}`}
                   {r.request.mode !== "normal" ? ` (${r.request.mode})` : ""}
                   {r.request.modifier ? (r.request.modifier > 0 ? ` +${r.request.modifier}` : ` ${r.request.modifier}`) : ""}
                 </span>
               </div>
               <div className="roll-result">
                 <span className="total">{r.total}</span>
-                <span className="breakdown">[{r.rolls.join(", ")}]</span>
+                <span className="breakdown">
+                  {r.breakdown
+                    ? r.breakdown.map((g) => `${g.diceType}: [${g.values.join(", ")}]`).join("  ")
+                    : `[${r.rolls.join(", ")}]`}
+                </span>
               </div>
             </div>
           ))}
@@ -234,6 +287,46 @@ export default function DiceTray({ rolls, onRoll }: Props) {
           font-family: var(--font-mono);
         }
         .mode-row { display: flex; gap: 8px; margin-top: 16px; }
+        .add-die-btn {
+          margin-top: 12px;
+          width: 100%;
+          background: transparent;
+          border: 1px dashed var(--rule);
+          color: var(--parchment-dim);
+          padding: 8px;
+          border-radius: 3px;
+          font-family: var(--font-mono);
+          font-size: 11px;
+        }
+        .add-die-btn:hover { border-color: var(--gold); color: var(--gold); }
+        .added-dice-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 10px;
+        }
+        .die-chip {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: var(--panel-raised);
+          border: 1px solid var(--gold);
+          color: var(--gold);
+          border-radius: 3px;
+          padding: 4px 8px;
+          font-family: var(--font-mono);
+          font-size: 11px;
+        }
+        .die-chip.current { border-style: dashed; opacity: 0.8; }
+        .chip-remove {
+          background: none;
+          border: none;
+          color: var(--parchment-dim);
+          font-size: 11px;
+          line-height: 1;
+          padding: 0;
+        }
+        .chip-remove:hover { color: var(--crimson); }
         .mode {
           flex: 1;
           background: transparent;

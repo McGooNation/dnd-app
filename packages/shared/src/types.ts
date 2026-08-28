@@ -22,11 +22,16 @@ export interface User {
 }
 
 export interface RollRequest {
-  diceType: DiceType;
-  count: number; // e.g. 2 for "2d6"
-  modifier: number; // flat +/- added to the total
-  mode?: "normal" | "advantage" | "disadvantage"; // only meaningful for single d20 rolls
+  diceType: DiceType; // the first/primary dice group's type — unchanged meaning
+  count: number; // e.g. 2 for "2d6" — the primary group's count, unchanged meaning
+  modifier: number; // flat +/- added to the combined total
+  mode?: "normal" | "advantage" | "disadvantage"; // only meaningful for a single d20 group (no extraDice)
   label?: string; // optional user note, e.g. "Fireball damage"
+  // Additional dice groups beyond the primary diceType/count above, for a
+  // roll that combines multiple different die types at once (e.g. "1d10 +
+  // 1d12"). Absent/empty for a normal single-type roll — every existing
+  // roll request continues to work exactly as it did before this existed.
+  extraDice?: { diceType: DiceType; count: number }[];
 }
 
 export interface RollResult {
@@ -34,8 +39,13 @@ export interface RollResult {
   roomId: string;
   user: User;
   request: RollRequest;
-  rolls: number[]; // individual die results, in order rolled
+  rolls: number[]; // every individual die result, flattened, in roll order (unchanged meaning/shape)
   total: number; // sum(rolls) + modifier (for advantage/disadvantage, the chosen roll + modifier)
+  // Present only for a genuine multi-dice-type roll (i.e. extraDice was
+  // non-empty), grouping the individual results by die type for a clear
+  // "d6 = 4, d6 = 2, d8 = 7" style display. Absent for every existing/simple
+  // roll — old saved history and single-type rolls render exactly as before.
+  breakdown?: { diceType: DiceType; values: number[] }[];
   timestamp: number;
 }
 

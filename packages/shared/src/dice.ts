@@ -39,32 +39,67 @@ function rollOne(sides: number): number {
   return Math.floor(Math.random() * sides) + 1;
 }
 
+// A single roll can combine at most this many different dice groups (e.g.
+// "3d4 + 2d6 + 1d8" is 3 groups) — generous for any realistic tabletop use,
+// while keeping a request from being able to request an unreasonable number
+// of separate groups.
+const MAX_DICE_GROUPS = 10;
+
 /**
  * Executes a roll request and returns the individual dice + computed total.
  * IMPORTANT: this should always run on the server, not trusted from a client,
  * or players could just report whatever total they want.
+ *
+ * A request is one or more "groups" — the primary diceType/count, plus any
+ * extraDice groups — each rolled independently and combined into one total.
+ * For the common case (no extraDice), this behaves exactly as it always has;
+ * `breakdown` is only included when there's genuinely more than one group.
  */
-export function executeRoll(request: RollRequest): { rolls: number[]; total: number } {
-  const sides = sidesFor(request.diceType);
-  if (sides === null) {
-    throw new Error(
-      `Invalid dice type "${request.diceType}". Use a preset or a custom die like "d37" between d${CUSTOM_DICE_MIN_SIDES} and d${CUSTOM_DICE_MAX_SIDES}.`
-    );
+export function executeRoll(
+  request: RollRequest
+): { rolls: number[]; total: number; breakdown?: { diceType: DiceType; values: number[] }[] } {
+  const groups = [{ diceType: request.diceType, count: request.count }, ...(request.extraDice ?? [])];
+
+  if (groups.length > MAX_DICE_GROUPS) {
+    throw new Error(`Too many different dice types in one roll — please use ${MAX_DICE_GROUPS} or fewer.`);
   }
-  const count = Math.max(1, Math.min(request.count ?? 1, 100)); // sanity cap
+  for (const group of groups) {
+    if (sidesFor(group.diceType) === null) {
+      throw new Error(
+        `Invalid dice type "${group.diceType}". Use a preset or a custom die like "d37" between d${CUSTOM_DICE_MIN_SIDES} and d${CUSTOM_DICE_MAX_SIDES}.`
+      );
+    }
+  }
+
   const modifier = request.modifier ?? 0;
 
-  if (request.mode === "advantage" || request.mode === "disadvantage") {
-    // Advantage/disadvantage is a single-die d20 mechanic: roll twice, keep one.
+  // Advantage/disadvantage is a single-die-type d20 mechanic — only
+  // meaningful (and only ever sent by the UI) when there's exactly one
+  // group, i.e. no extra dice were added to the roll. Completely unchanged
+  // from before this feature existed.
+  if ((request.mode === "advantage" || request.mode === "disadvantage") && groups.length === 1) {
+    const sides = sidesFor(groups[0].diceType)!;
     const a = rollOne(sides);
     const b = rollOne(sides);
     const chosen = request.mode === "advantage" ? Math.max(a, b) : Math.min(a, b);
     return { rolls: [a, b], total: chosen + modifier };
   }
 
-  const rolls = Array.from({ length: count }, () => rollOne(sides));
-  const total = rolls.reduce((sum, r) => sum + r, 0) + modifier;
-  return { rolls, total };
+  const breakdown: { diceType: DiceType; values: number[] }[] = [];
+  const allRolls: number[] = [];
+  for (const group of groups) {
+    const sides = sidesFor(group.diceType)!;
+    const count = Math.max(1, Math.min(group.count ?? 1, 100)); // same sanity cap as before, per group
+    const values = Array.from({ length: count }, () => rollOne(sides));
+    breakdown.push({ diceType: group.diceType, values });
+    allRolls.push(...values);
+  }
+  const total = allRolls.reduce((sum, r) => sum + r, 0) + modifier;
+
+  // Only attach breakdown when there's genuinely more than one group — this
+  // is what keeps a normal single-type roll (the overwhelmingly common case)
+  // producing the exact same result shape it always has.
+  return groups.length > 1 ? { rolls: allRolls, total, breakdown } : { rolls: allRolls, total };
 }
 
 /** Assigns a stable-looking but random accent color to a new user. */

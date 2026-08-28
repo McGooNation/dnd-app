@@ -93,6 +93,12 @@ function rollOne(sides) {
   return Math.floor(Math.random() * sides) + 1;
 }
 
+// A single roll can combine at most this many different dice groups (e.g.
+// "3d4 + 2d6 + 1d8" is 3 groups) — generous for any realistic tabletop use,
+// while keeping a request from being able to request an unreasonable number
+// of separate groups. Mirrors packages/shared/src/dice.ts.
+const MAX_DICE_GROUPS = 10;
+
 /** Builds the roll request used by "Roll Initiative". Always 1d20 today;
  * takes a modifier so a future Dexterity bonus from a character sheet can be
  * passed in here later without changing anything that calls this function. */
@@ -100,26 +106,48 @@ function rollInitiativeRequest(modifier = 0) {
   return { diceType: "d20", count: 1, modifier };
 }
 
+/** A request is one or more "groups" — the primary diceType/count, plus any
+ * extraDice groups — each rolled independently and combined into one total.
+ * For the common case (no extraDice), this behaves exactly as it always
+ * has; `breakdown` is only included when there's genuinely more than one
+ * group. Mirrors packages/shared/src/dice.ts — see that file's header
+ * comment for why this duplication exists. */
 function executeRoll(request) {
-  const sides = sidesFor(request.diceType);
-  if (sides === null) {
-    throw new Error(
-      `Invalid dice type "${request.diceType}". Use a preset or a custom die like "d37" between d${CUSTOM_DICE_MIN_SIDES} and d${CUSTOM_DICE_MAX_SIDES}.`
-    );
+  const groups = [{ diceType: request.diceType, count: request.count }, ...(request.extraDice || [])];
+
+  if (groups.length > MAX_DICE_GROUPS) {
+    throw new Error(`Too many different dice types in one roll — please use ${MAX_DICE_GROUPS} or fewer.`);
   }
-  const count = Math.max(1, Math.min(request.count || 1, 100));
+  for (const group of groups) {
+    if (sidesFor(group.diceType) === null) {
+      throw new Error(
+        `Invalid dice type "${group.diceType}". Use a preset or a custom die like "d37" between d${CUSTOM_DICE_MIN_SIDES} and d${CUSTOM_DICE_MAX_SIDES}.`
+      );
+    }
+  }
+
   const modifier = request.modifier || 0;
 
-  if (request.mode === "advantage" || request.mode === "disadvantage") {
+  if ((request.mode === "advantage" || request.mode === "disadvantage") && groups.length === 1) {
+    const sides = sidesFor(groups[0].diceType);
     const a = rollOne(sides);
     const b = rollOne(sides);
     const chosen = request.mode === "advantage" ? Math.max(a, b) : Math.min(a, b);
     return { rolls: [a, b], total: chosen + modifier };
   }
 
-  const rolls = Array.from({ length: count }, () => rollOne(sides));
-  const total = rolls.reduce((sum, r) => sum + r, 0) + modifier;
-  return { rolls, total };
+  const breakdown = [];
+  const allRolls = [];
+  for (const group of groups) {
+    const sides = sidesFor(group.diceType);
+    const count = Math.max(1, Math.min(group.count || 1, 100));
+    const values = Array.from({ length: count }, () => rollOne(sides));
+    breakdown.push({ diceType: group.diceType, values });
+    allRolls.push(...values);
+  }
+  const total = allRolls.reduce((sum, r) => sum + r, 0) + modifier;
+
+  return groups.length > 1 ? { rolls: allRolls, total, breakdown } : { rolls: allRolls, total };
 }
 
 const app = express();
@@ -463,7 +491,7 @@ io.on("connection", (socket) => {
     }
 
     try {
-      const { rolls, total } = executeRoll(request);
+      const { rolls, total, breakdown } = executeRoll(request);
       const result = {
         id: uuid(),
         roomId,
@@ -473,6 +501,7 @@ io.on("connection", (socket) => {
         total,
         timestamp: Date.now(),
       };
+      if (breakdown) result.breakdown = breakdown;
       if (room.lobbyId) lobbyStore.appendRoll(room.lobbyId, result);
       // Broadcast to everyone in the room, including the roller — this is the
       // "everyone can see what you roll" requirement.
