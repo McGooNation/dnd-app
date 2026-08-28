@@ -158,6 +158,11 @@ export function useRealtimeRoom({
         prev ? { ...prev, tokens: prev.tokens.map((t) => (t.id === tokenId ? { ...t, ...changes } : t)) } : prev
       );
     });
+    socket.on("battlemap:tokenImageUpdated", ({ tokenId, imageUrl }) => {
+      setBattleMap((prev) =>
+        prev ? { ...prev, tokens: prev.tokens.map((t) => (t.id === tokenId ? { ...t, imageUrl } : t)) } : prev
+      );
+    });
 
     return () => {
       socket.emit("room:leave", { roomId });
@@ -268,6 +273,15 @@ export function useRealtimeRoom({
       socketRef.current?.emit("battlemap:updateToken", { roomId, tokenId, changes, token }),
     [roomId, token]
   );
+  const setTokenImage = useCallback(
+    (tokenId: string, imageDataUrl: string) =>
+      socketRef.current?.emit("battlemap:setTokenImage", { roomId, tokenId, imageDataUrl, token }),
+    [roomId, token]
+  );
+  const removeTokenImage = useCallback(
+    (tokenId: string) => socketRef.current?.emit("battlemap:removeTokenImage", { roomId, tokenId, token }),
+    [roomId, token]
+  );
 
   return {
     connected,
@@ -304,5 +318,7 @@ export function useRealtimeRoom({
     removeTokenFromMap,
     moveTokenOnMap,
     updateTokenOnMap,
+    setTokenImage,
+    removeTokenImage,
   };
 }

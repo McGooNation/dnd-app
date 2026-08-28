@@ -3,17 +3,12 @@
 // library (e.g. sharp), which tends to need native build tools that are
 // exactly the kind of thing that's caused install trouble on Windows before.
 // This also means the payload sent over the socket is already small.
-
-const MAX_DIMENSION = 2000; // px, on the longer side
-const WEBP_QUALITY = 0.85; // WebP is more efficient than JPEG, so this can be a
-// touch higher than the old JPEG quality while still ending up smaller overall.
-const JPEG_QUALITY = 0.82; // used only as a fallback — see below.
-
-// If the original file is already at or under this size AND already within
-// MAX_DIMENSION, there's nothing meaningful to gain from resizing/recompressing
-// it — doing so anyway would just be unnecessary processing (and a pointless
-// generation loss if it's already a compressed format). It's used as-is.
-const SKIP_PROCESSING_MAX_BYTES = 800 * 1024;
+//
+// Used for two different things with two different size budgets: the map
+// background (a full-screen image) and individual token portraits (a small
+// visual element) — see resizeImageFile vs resizeTokenImageFile below. Both
+// share the same underlying technique, just with different numbers, since
+// a token image has no business being anywhere near as large as a map.
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -24,13 +19,22 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-/** Resolves to a data URL suitable for use as a battle map background:
- * resized so its longer side is at most MAX_DIMENSION, and compressed for a
- * meaningfully smaller file size while keeping good visual quality —
- * WebP when the browser genuinely supports encoding it (verified, not
- * assumed — see below), JPEG otherwise. Already-small, already-appropriately
- * -sized images are returned as-is rather than needlessly reprocessed. */
-export function resizeImageFile(file: File): Promise<string> {
+interface ResizeOptions {
+  maxDimension: number;
+  webpQuality: number;
+  jpegQuality: number;
+  skipProcessingMaxBytes: number;
+}
+
+/** Resolves to a data URL: resized so its longer side is at most
+ * `maxDimension` (never upscaled — a smaller original is left at its own
+ * size), and compressed for a meaningfully smaller file size while keeping
+ * good visual quality — WebP when the browser genuinely supports encoding
+ * it (verified, not assumed — see below), JPEG otherwise. Already-small,
+ * already-appropriately-sized images are returned as-is rather than
+ * needlessly reprocessed. */
+function resizeImage(file: File, options: ResizeOptions): Promise<string> {
+  const { maxDimension, webpQuality, jpegQuality, skipProcessingMaxBytes } = options;
   return new Promise((resolve, reject) => {
     const img = new Image();
     const objectUrl = URL.createObjectURL(file);
@@ -39,15 +43,15 @@ export function resizeImageFile(file: File): Promise<string> {
       const { width: originalWidth, height: originalHeight } = img;
       URL.revokeObjectURL(objectUrl);
 
-      if (file.size <= SKIP_PROCESSING_MAX_BYTES && originalWidth <= MAX_DIMENSION && originalHeight <= MAX_DIMENSION) {
+      if (file.size <= skipProcessingMaxBytes && originalWidth <= maxDimension && originalHeight <= maxDimension) {
         readFileAsDataUrl(file).then(resolve).catch(reject);
         return;
       }
 
       let width = originalWidth;
       let height = originalHeight;
-      if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-        const scale = MAX_DIMENSION / Math.max(width, height);
+      if (width > maxDimension || height > maxDimension) {
+        const scale = maxDimension / Math.max(width, height);
         width = Math.round(width * scale);
         height = Math.round(height * scale);
       }
@@ -69,11 +73,11 @@ export function resizeImageFile(file: File): Promise<string> {
       // tells us whether it actually complied; if it didn't, re-encode as
       // JPEG (the previously proven-reliable choice) instead of silently
       // keeping an oversized, unintended PNG.
-      const webpResult = canvas.toDataURL("image/webp", WEBP_QUALITY);
+      const webpResult = canvas.toDataURL("image/webp", webpQuality);
       if (webpResult.startsWith("data:image/webp")) {
         resolve(webpResult);
       } else {
-        resolve(canvas.toDataURL("image/jpeg", JPEG_QUALITY));
+        resolve(canvas.toDataURL("image/jpeg", jpegQuality));
       }
     };
 
@@ -84,4 +88,20 @@ export function resizeImageFile(file: File): Promise<string> {
 
     img.src = objectUrl;
   });
+}
+
+/** For the battle map's background image — unchanged numbers from before
+ * this file was generalized. */
+export function resizeImageFile(file: File): Promise<string> {
+  return resizeImage(file, { maxDimension: 2000, webpQuality: 0.85, jpegQuality: 0.82, skipProcessingMaxBytes: 800 * 1024 });
+}
+
+/** For an individual token's portrait/image — a much smaller visual
+ * element than the map, so it gets its own, much smaller budget. Matches
+ * the server's own independent limits (512px, ~500KB) in
+ * server/battleMap.js — this is what keeps a normal upload comfortably
+ * under what the server will accept, though the server never trusts this
+ * client-side step alone and verifies both independently. */
+export function resizeTokenImageFile(file: File): Promise<string> {
+  return resizeImage(file, { maxDimension: 512, webpQuality: 0.85, jpegQuality: 0.82, skipProcessingMaxBytes: 80 * 1024 });
 }

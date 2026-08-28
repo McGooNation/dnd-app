@@ -1,19 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PRESET_TOKEN_COLORS, TOKEN_SIZES, Token } from "shared";
+import { resizeTokenImageFile } from "../lib/resizeImage";
 
 interface Props {
   token: Token;
   onRemove: () => void;
   onColorChange: (hex: string) => void;
   onSizeChange: (size: string) => void;
+  onSetImage: (dataUrl: string) => void;
+  onRemoveImage: () => void;
 }
 
-type Submenu = null | "remove" | "color" | "size";
+type Submenu = null | "remove" | "color" | "size" | "image";
 
-export default function ContextToolbar({ token, onRemove, onColorChange, onSizeChange }: Props) {
+export default function ContextToolbar({ token, onRemove, onColorChange, onSizeChange, onSetImage, onRemoveImage }: Props) {
   const [submenu, setSubmenu] = useState<Submenu>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Config-array driven so future buttons (Rename, Duplicate, HP, Conditions,
   // Token Image, Notes, Lock Position, ...) are just new entries here —
@@ -22,7 +27,26 @@ export default function ContextToolbar({ token, onRemove, onColorChange, onSizeC
     { key: "remove", icon: "🗑", label: "Remove from Map" },
     { key: "color", icon: "🎨", label: "Color" },
     { key: "size", icon: "📏", label: "Size" },
+    { key: "image", icon: "🖼", label: "Image" },
   ];
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    setImageError(null);
+
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      setImageError("Please choose a PNG, JPG, or WEBP image.");
+      return;
+    }
+    try {
+      const dataUrl = await resizeTokenImageFile(file);
+      onSetImage(dataUrl);
+    } catch {
+      setImageError("Couldn't process that image — please try again.");
+    }
+  }
 
   return (
     <div className="toolbar" onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
@@ -84,6 +108,33 @@ export default function ContextToolbar({ token, onRemove, onColorChange, onSizeC
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {submenu === "image" && (
+        <div className="submenu image-submenu">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
+          <button className="image-action" onClick={() => fileInputRef.current?.click()}>
+            {token.imageUrl ? "Replace Image" : "Upload Image"}
+          </button>
+          {token.imageUrl && (
+            <button
+              className="image-action danger"
+              onClick={() => {
+                onRemoveImage();
+                setSubmenu(null);
+              }}
+            >
+              Remove Image
+            </button>
+          )}
+          {imageError && <p className="image-error">{imageError}</p>}
         </div>
       )}
 
@@ -157,6 +208,22 @@ export default function ContextToolbar({ token, onRemove, onColorChange, onSizeC
         }
         .size-btn:hover { border-color: var(--gold); }
         .size-btn.selected { border-color: var(--gold); color: var(--gold); }
+        .image-submenu { display: flex; flex-direction: column; gap: 6px; min-width: 140px; }
+        .image-action {
+          background: var(--panel-raised);
+          border: 1px solid var(--rule);
+          border-radius: 3px;
+          padding: 6px 10px;
+          font-family: var(--font-mono);
+          font-size: 11px;
+          color: var(--parchment-dim);
+          text-align: left;
+          cursor: pointer;
+        }
+        .image-action:hover { border-color: var(--gold); color: var(--gold); }
+        .image-action.danger { border-color: var(--crimson); color: var(--crimson); }
+        .image-action.danger:hover { background: var(--crimson); color: var(--parchment); }
+        .image-error { color: var(--crimson); font-size: 11px; margin: 0; max-width: 160px; }
       `}</style>
     </div>
   );

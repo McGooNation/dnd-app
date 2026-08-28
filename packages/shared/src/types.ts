@@ -187,6 +187,8 @@ export interface ClientToServerEvents {
   "battlemap:removeToken": (payload: { roomId: string; tokenId: string; token?: string }) => void;
   "battlemap:moveToken": (payload: { roomId: string; tokenId: string; x: number; y: number; token?: string; final?: boolean }) => void;
   "battlemap:updateToken": (payload: { roomId: string; tokenId: string; changes: { color?: string; size?: string }; token?: string }) => void;
+  "battlemap:setTokenImage": (payload: { roomId: string; tokenId: string; imageDataUrl: string; token?: string }) => void;
+  "battlemap:removeTokenImage": (payload: { roomId: string; tokenId: string; token?: string }) => void;
 }
 
 // Server -> Client
@@ -211,4 +213,8 @@ export interface ServerToClientEvents {
   "battlemap:tokenRemoved": (payload: { tokenId: string }) => void;
   "battlemap:tokenMoved": (payload: { tokenId: string; x: number; y: number }) => void;
   "battlemap:tokenUpdated": (payload: { tokenId: string; changes: Partial<Pick<Token, "color" | "size">> }) => void;
+  // Fires ONLY when a token's image is actually uploaded, replaced, or
+  // removed — never on move/resize/recolor/selection. `imageUrl` is null
+  // when the image was removed (or never set).
+  "battlemap:tokenImageUpdated": (payload: { tokenId: string; imageUrl: string | null }) => void;
 }

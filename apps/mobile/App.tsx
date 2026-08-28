@@ -513,6 +513,8 @@ function RoomScreen({
     removeTokenFromMap,
     moveTokenOnMap,
     updateTokenOnMap,
+    setTokenImage,
+    removeTokenImage,
     error,
     errorKey,
   } = useRealtimeRoom({
@@ -758,6 +760,8 @@ function RoomScreen({
           onRemoveToken={removeTokenFromMap}
           onMoveToken={moveTokenOnMap}
           onUpdateToken={updateTokenOnMap}
+          onSetTokenImage={setTokenImage}
+          onRemoveTokenImage={removeTokenImage}
         />
       ) : tab === "dice" ? (
         <View style={{ flex: 1 }}>
@@ -1112,6 +1116,90 @@ const MAX_UPLOAD_DIMENSION = 2000; // px, on the longer side — matches the web
 // matches the same idea in apps/web/lib/resizeImage.ts.
 const SKIP_PROCESSING_MAX_BYTES = 800 * 1024;
 
+// A token's image is a much smaller visual element than the map background,
+// so it gets its own, much smaller budget — matches server/battleMap.js's
+// independent limits (512px, ~500KB), which the server verifies on its own
+// regardless of what this step actually produces.
+const TOKEN_IMAGE_MAX_BASE64_LENGTH = 700_000;
+const TOKEN_IMAGE_MAX_DIMENSION = 512;
+const TOKEN_IMAGE_SKIP_PROCESSING_MAX_BYTES = 80 * 1024;
+
+/** Picks an image from the library and resizes/compresses it client-side —
+ * shared by the map background upload and the per-token image upload,
+ * parameterized by size budget so each gets its own limits without
+ * duplicating the picker/resize logic itself. Resolves to `{ dataUrl }` on
+ * success, `{ error }` with a user-facing message on failure, or `null` if
+ * the user simply canceled the picker. */
+async function pickAndProcessImage(
+  maxDimension: number,
+  maxBase64Length: number,
+  skipProcessingMaxBytes: number
+): Promise<{ dataUrl: string } | { error: string } | null> {
+  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!permission.granted) {
+    return { error: "Photo library access is needed to upload an image." };
+  }
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    quality: 1, // manipulateAsync below handles the actual compression
+    base64: true, // only used for the "already small enough" fast path below
+  });
+  if (result.canceled || !result.assets?.[0]) return null;
+
+  const picked = result.assets[0];
+  const longerSide = Math.max(picked.width || 0, picked.height || 0);
+
+  // Already small and already appropriately sized — nothing meaningful to
+  // gain from resizing/recompressing it, and doing so anyway would just be
+  // unnecessary processing (plus a pointless generation loss if it's
+  // already a compressed format).
+  if (
+    typeof picked.fileSize === "number" &&
+    picked.fileSize <= skipProcessingMaxBytes &&
+    longerSide <= maxDimension &&
+    picked.base64
+  ) {
+    const mime = picked.mimeType && ["image/jpeg", "image/png", "image/webp"].includes(picked.mimeType) ? picked.mimeType : "image/jpeg";
+    const dataUrl = `data:${mime};base64,${picked.base64}`;
+    if (dataUrl.length > maxBase64Length) {
+      return { error: "That image is too large — please use a smaller one." };
+    }
+    return { dataUrl };
+  }
+
+  // Resize (only if larger than the cap) and compress client-side — same
+  // idea as the web canvas resize, done here via Expo's own image module so
+  // no server-side native image library is needed. WebP is preferred
+  // (smaller than JPEG at equivalent quality, and — unlike the web canvas
+  // approach — expo-image-manipulator's WebP encoding is a native,
+  // first-class supported option, not something that needs a
+  // browser-compatibility fallback check).
+  const resizeAction =
+    longerSide > maxDimension
+      ? [{ resize: picked.width >= picked.height ? { width: maxDimension } : { height: maxDimension } }]
+      : [];
+
+  let manipulated;
+  try {
+    manipulated = await ImageManipulator.manipulateAsync(picked.uri, resizeAction, {
+      compress: 0.85,
+      format: ImageManipulator.SaveFormat.WEBP,
+      base64: true,
+    });
+  } catch {
+    return { error: "Couldn't process that image — please try again." };
+  }
+  if (!manipulated.base64) {
+    return { error: "Couldn't process that image — please try again." };
+  }
+
+  const dataUrl = `data:image/webp;base64,${manipulated.base64}`;
+  if (dataUrl.length > maxBase64Length) {
+    return { error: "That image is too large — please use a smaller one." };
+  }
+  return { dataUrl };
+}
+
 function BattleMapView({
   battleMap,
   users,
@@ -1122,6 +1210,8 @@ function BattleMapView({
   onRemoveToken,
   onMoveToken,
   onUpdateToken,
+  onSetTokenImage,
+  onRemoveTokenImage,
 }: {
   battleMap: BattleMapState | null;
   users: User[];
@@ -1132,6 +1222,8 @@ function BattleMapView({
   onRemoveToken: (tokenId: string) => void;
   onMoveToken: (tokenId: string, x: number, y: number, final?: boolean) => void;
   onUpdateToken: (tokenId: string, changes: { color?: string; size?: string }) => void;
+  onSetTokenImage: (tokenId: string, imageDataUrl: string) => void;
+  onRemoveTokenImage: (tokenId: string) => void;
 }) {
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   // Selection is local-only React state — never sent over the socket, so
@@ -1175,75 +1267,13 @@ function BattleMapView({
 
   async function handleUpload() {
     setUploadError(null);
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setUploadError("Photo library access is needed to upload a map.");
+    const result = await pickAndProcessImage(MAX_UPLOAD_DIMENSION, MAX_UPLOAD_BASE64_LENGTH, SKIP_PROCESSING_MAX_BYTES);
+    if (!result) return; // user canceled the picker
+    if ("error" in result) {
+      setUploadError(result.error);
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 1, // manipulateAsync below handles the actual compression
-      base64: true, // only used for the "already small enough" fast path below
-    });
-    if (result.canceled || !result.assets?.[0]) return;
-
-    const picked = result.assets[0];
-    const longerSide = Math.max(picked.width || 0, picked.height || 0);
-
-    // Already small and already appropriately sized — nothing meaningful to
-    // gain from resizing/recompressing it, and doing so anyway would just be
-    // unnecessary processing (plus a pointless generation loss if it's
-    // already a compressed format).
-    if (
-      typeof picked.fileSize === "number" &&
-      picked.fileSize <= SKIP_PROCESSING_MAX_BYTES &&
-      longerSide <= MAX_UPLOAD_DIMENSION &&
-      picked.base64
-    ) {
-      const mime = picked.mimeType && ["image/jpeg", "image/png", "image/webp"].includes(picked.mimeType) ? picked.mimeType : "image/jpeg";
-      const dataUrl = `data:${mime};base64,${picked.base64}`;
-      if (dataUrl.length > MAX_UPLOAD_BASE64_LENGTH) {
-        setUploadError("That image is too large — please use something under 5MB.");
-        return;
-      }
-      onSetImage(dataUrl);
-      return;
-    }
-
-    // Resize (only if larger than the cap) and compress client-side —
-    // same idea as the web canvas resize, done here via Expo's own image
-    // module so no server-side native image library is needed. WebP is
-    // preferred (smaller than JPEG at equivalent quality, and — unlike the
-    // web canvas approach — expo-image-manipulator's WebP encoding is a
-    // native, first-class supported option, not something that needs a
-    // browser-compatibility fallback check).
-    const resizeAction =
-      longerSide > MAX_UPLOAD_DIMENSION
-        ? [{ resize: picked.width >= picked.height ? { width: MAX_UPLOAD_DIMENSION } : { height: MAX_UPLOAD_DIMENSION } }]
-        : [];
-
-    let manipulated;
-    try {
-      manipulated = await ImageManipulator.manipulateAsync(picked.uri, resizeAction, {
-        compress: 0.85,
-        format: ImageManipulator.SaveFormat.WEBP,
-        base64: true,
-      });
-    } catch {
-      setUploadError("Couldn't process that image — please try again.");
-      return;
-    }
-    if (!manipulated.base64) {
-      setUploadError("Couldn't process that image — please try again.");
-      return;
-    }
-
-    const dataUrl = `data:image/webp;base64,${manipulated.base64}`;
-    if (dataUrl.length > MAX_UPLOAD_BASE64_LENGTH) {
-      setUploadError("That image is too large — please use something under 5MB.");
-      return;
-    }
-    onSetImage(dataUrl);
+    onSetImage(result.dataUrl);
   }
 
   return (
@@ -1330,6 +1360,8 @@ function BattleMapView({
             onRemove={() => confirmRemove(selectedToken.id)}
             onColorChange={(hex) => onUpdateToken(selectedToken.id, { color: hex })}
             onSizeChange={(size) => onUpdateToken(selectedToken.id, { size })}
+            onSetImage={(dataUrl) => onSetTokenImage(selectedToken.id, dataUrl)}
+            onRemoveImage={() => onRemoveTokenImage(selectedToken.id)}
           />
         )}
       </View>
@@ -1406,8 +1438,18 @@ function DraggableToken({
     })
   ).current;
 
+  // If a token's image somehow fails to render (corrupt data, a transient
+  // load issue, etc.), fall back to the normal initials/color appearance
+  // rather than showing nothing. Resets whenever the image itself changes,
+  // so a fresh upload after a failure always gets a clean try.
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => {
+    setImageFailed(false);
+  }, [token.imageUrl]);
+
   const scale = SIZE_SCALE[token.size] ?? 1;
   const size = BASE_TOKEN_SIZE * scale;
+  const showImage = !!token.imageUrl && !imageFailed;
 
   return (
     <View
@@ -1427,9 +1469,22 @@ function DraggableToken({
         selected && styles.mapTokenSelected,
       ]}
     >
-      <Text style={[styles.mapTokenInner, { color: getContrastTextColor(token.color) }]}>
-        {token.label.slice(0, 2).toUpperCase()}
-      </Text>
+      {showImage ? (
+        // The image fills the token exactly and is clipped to its existing
+        // shape (mapToken/mapTokenSquare already set overflow: hidden) —
+        // the clickable/draggable area is entirely controlled by the outer
+        // View's size above, completely unaffected by the image itself.
+        <Image
+          source={{ uri: token.imageUrl! }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <Text style={[styles.mapTokenInner, { color: getContrastTextColor(token.color) }]}>
+          {token.label.slice(0, 2).toUpperCase()}
+        </Text>
+      )}
       {showLabel && <Text style={styles.mapTokenLabel} numberOfLines={1}>{token.label}</Text>}
     </View>
   );
@@ -1442,22 +1497,42 @@ function MobileContextToolbar({
   onRemove,
   onColorChange,
   onSizeChange,
+  onSetImage,
+  onRemoveImage,
 }: {
   token: Token;
   onRemove: () => void;
   onColorChange: (hex: string) => void;
   onSizeChange: (size: string) => void;
+  onSetImage: (dataUrl: string) => void;
+  onRemoveImage: () => void;
 }) {
-  const [submenu, setSubmenu] = useState<null | "color" | "size">(null);
+  const [submenu, setSubmenu] = useState<null | "color" | "size" | "image">(null);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageBusy, setImageBusy] = useState(false);
 
   // Config-array driven so future buttons (Rename, Duplicate, HP,
-  // Conditions, Token Image, Notes, Lock Position, ...) are just new
-  // entries here — nothing about how the toolbar renders needs to change.
-  const actions: { key: "remove" | "color" | "size"; icon: string; label: string }[] = [
+  // Conditions, Notes, Lock Position, ...) are just new entries here —
+  // nothing about how the toolbar renders needs to change.
+  const actions: { key: "remove" | "color" | "size" | "image"; icon: string; label: string }[] = [
     { key: "remove", icon: "🗑", label: "Remove" },
     { key: "color", icon: "🎨", label: "Color" },
     { key: "size", icon: "📏", label: "Size" },
+    { key: "image", icon: "🖼", label: "Image" },
   ];
+
+  async function handlePickImage() {
+    setImageError(null);
+    setImageBusy(true);
+    const result = await pickAndProcessImage(TOKEN_IMAGE_MAX_DIMENSION, TOKEN_IMAGE_MAX_BASE64_LENGTH, TOKEN_IMAGE_SKIP_PROCESSING_MAX_BYTES);
+    setImageBusy(false);
+    if (!result) return; // user canceled the picker
+    if ("error" in result) {
+      setImageError(result.error);
+      return;
+    }
+    onSetImage(result.dataUrl);
+  }
 
   return (
     <View
@@ -1507,6 +1582,28 @@ function MobileContextToolbar({
               </Text>
             </TouchableOpacity>
           ))}
+        </View>
+      )}
+
+      {submenu === "image" && (
+        <View style={styles.ctxSizeOptions}>
+          <TouchableOpacity style={styles.ctxSizeBtn} onPress={handlePickImage} disabled={imageBusy}>
+            <Text style={styles.ctxSizeBtnText}>
+              {imageBusy ? "Processing…" : token.imageUrl ? "Replace Image" : "Upload Image"}
+            </Text>
+          </TouchableOpacity>
+          {token.imageUrl && (
+            <TouchableOpacity
+              style={styles.ctxSizeBtn}
+              onPress={() => {
+                onRemoveImage();
+                setSubmenu(null);
+              }}
+            >
+              <Text style={[styles.ctxSizeBtnText, { color: COLORS.crimson }]}>Remove Image</Text>
+            </TouchableOpacity>
+          )}
+          {imageError && <Text style={styles.ctxImageError}>{imageError}</Text>}
         </View>
       )}
     </View>
@@ -1842,6 +1939,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 2,
     borderColor: COLORS.ink,
+    overflow: "hidden",
   },
   mapTokenSquare: { borderRadius: 6 },
   mapTokenSelected: { borderColor: COLORS.gold, borderWidth: 2 },
@@ -1901,6 +1999,7 @@ const styles = StyleSheet.create({
   ctxSizeBtnSelected: { borderColor: COLORS.gold },
   ctxSizeBtnText: { color: COLORS.parchmentDim, fontSize: 11 },
   ctxSizeBtnTextSelected: { color: COLORS.gold },
+  ctxImageError: { color: COLORS.crimson, fontSize: 11, marginTop: 4, maxWidth: 160 },
   modifierLabel: { color: COLORS.parchmentDim, fontSize: 10, letterSpacing: 1, marginBottom: 4, textAlign: "center" },
   modifierInput: {
     width: 56,

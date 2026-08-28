@@ -15,6 +15,8 @@ interface Props {
   onRemoveToken: (tokenId: string) => void;
   onMoveToken: (tokenId: string, x: number, y: number, final?: boolean) => void;
   onUpdateToken: (tokenId: string, changes: { color?: string; size?: string }) => void;
+  onSetTokenImage: (tokenId: string, imageDataUrl: string) => void;
+  onRemoveTokenImage: (tokenId: string) => void;
 }
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
@@ -30,6 +32,8 @@ export default function BattleMap({
   onRemoveToken,
   onMoveToken,
   onUpdateToken,
+  onSetTokenImage,
+  onRemoveTokenImage,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -42,6 +46,11 @@ export default function BattleMap({
   // choice, not shared lobby data, so each person can set it independently.
   // Defaults to on, matching the always-on behavior before this feature existed.
   const [showTokenNames, setShowTokenNames] = useState(true);
+  // If a token's image data URL somehow fails to render (corrupt data,
+  // browser quirk, etc.), fall back to the normal initials/color appearance
+  // rather than showing nothing — keyed by the image's own data, so a token
+  // getting a fresh image after a failure always gets a clean try.
+  const [imageLoadFailed, setImageLoadFailed] = useState<Set<string>>(new Set());
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [customName, setCustomName] = useState("");
   const [customType, setCustomType] = useState<"monster" | "npc">("monster");
@@ -263,6 +272,16 @@ export default function BattleMap({
               <span className="token-inner" style={{ color: getContrastTextColor(t.color) }}>
                 {t.label.slice(0, 2).toUpperCase()}
               </span>
+              {t.imageUrl && !imageLoadFailed.has(t.imageUrl) && (
+                <img
+                  key={t.imageUrl}
+                  src={t.imageUrl}
+                  alt={t.label}
+                  className="token-image"
+                  draggable={false}
+                  onError={() => setImageLoadFailed((prev) => new Set(prev).add(t.imageUrl!))}
+                />
+              )}
               {showTokenNames && <span className="token-label">{t.label}</span>}
             </div>
           );
@@ -285,6 +304,8 @@ export default function BattleMap({
               }}
               onColorChange={(hex) => onUpdateToken(selectedToken.id, { color: hex })}
               onSizeChange={(size) => onUpdateToken(selectedToken.id, { size })}
+              onSetImage={(dataUrl) => onSetTokenImage(selectedToken.id, dataUrl)}
+              onRemoveImage={() => onRemoveTokenImage(selectedToken.id)}
             />
           </div>
         )}
@@ -363,9 +384,18 @@ export default function BattleMap({
           box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
           user-select: none;
           touch-action: none;
+          overflow: hidden;
         }
         .token.monster, .token.npc { border-radius: 6px; }
         .token.selected { outline: 2px solid var(--gold); outline-offset: 2px; }
+        .token-image {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          pointer-events: none;
+        }
         .token-inner {
           font-family: var(--font-mono);
           font-size: 11px;

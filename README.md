@@ -209,6 +209,22 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
     Gargantuan later is adding entries to that table. Label text
     automatically switches between black and white for contrast against
     whatever color a token has, via a shared luminance-based helper.
+  - **Optional per-token image** (a character portrait, monster art, etc.),
+    for Player, Monster, and NPC tokens alike — uploaded via the context
+    toolbar's "Image" button, replacing the token's initials while set (the
+    initials remain the fallback: they're what shows again if the image is
+    removed, or if it ever fails to load). Client-resized to a small
+    512px/~500KB budget before upload — deliberately its *own*, much
+    smaller limit than the map background image, since a token portrait has
+    no business being anywhere near map-sized. The server never trusts that
+    resize step alone: it independently re-verifies both the file size and
+    the image's actual pixel dimensions by reading them straight out of the
+    file header (no image-decoding library needed for that). Uploading,
+    replacing, or removing a token's image broadcasts only that one token's
+    id and image — moving it, recoloring it, resizing it, or selecting it
+    never retransmits the image, verified directly: moving 10 image-bearing
+    tokens 50 times between two connected players produced zero image
+    retransmissions and a largest single network message of 64 bytes.
   - Persisted for saved lobbies (`state.battleMap` — the same reserved field
     initiative uses); ephemeral for guest lobbies, exactly like everything
     else guest-created.

@@ -65,6 +65,8 @@ export default function RoomView({
     removeTokenFromMap,
     moveTokenOnMap,
     updateTokenOnMap,
+    setTokenImage,
+    removeTokenImage,
     error,
     errorKey,
   } = useRealtimeRoom({ serverUrl, roomId, name, token, visibility, joinPolicy, maxPlayers });
@@ -226,6 +228,8 @@ export default function RoomView({
             onRemoveToken={removeTokenFromMap}
             onMoveToken={moveTokenOnMap}
             onUpdateToken={updateTokenOnMap}
+            onSetTokenImage={setTokenImage}
+            onRemoveTokenImage={removeTokenImage}
           />
         </div>
         <div className="col-right">

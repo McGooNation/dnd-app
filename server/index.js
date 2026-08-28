@@ -834,6 +834,36 @@ io.on("connection", (socket) => {
     io.to(roomId).emit("battlemap:tokenUpdated", { tokenId, changes: { color: updatedToken.color, size: updatedToken.size } });
   });
 
+  socket.on("battlemap:setTokenImage", ({ roomId, tokenId, imageDataUrl, token }) => {
+    const { room, lobby } = requireBattleMapPermission(roomId);
+    if (!room || !checkBattleMapPermission(lobby, token)) return;
+    const result = battleMap.setTokenImage(room.battleMap, tokenId, imageDataUrl);
+    if (!result.ok) {
+      const messages = {
+        not_found: "That token no longer exists.",
+        invalid_or_too_large: "That file couldn't be used — please upload a valid PNG, JPG, or WEBP image under 500KB.",
+        too_large_dimensions: "That image is too large — please use something no larger than 512×512 pixels.",
+      };
+      socket.emit("error:message", { message: messages[result.reason] || "That image couldn't be used." });
+      return;
+    }
+    persistBattleMap(room);
+    // Only ever the token's id and its (already-processed, already-small)
+    // image — never the map image, never any other token, and this only
+    // ever fires when the image itself actually changes, never on move,
+    // resize, recolor, selection, or anything else.
+    io.to(roomId).emit("battlemap:tokenImageUpdated", { tokenId, imageUrl: result.token.imageUrl });
+  });
+
+  socket.on("battlemap:removeTokenImage", ({ roomId, tokenId, token }) => {
+    const { room, lobby } = requireBattleMapPermission(roomId);
+    if (!room || !checkBattleMapPermission(lobby, token)) return;
+    const updated = battleMap.removeTokenImage(room.battleMap, tokenId);
+    if (!updated) return;
+    persistBattleMap(room);
+    io.to(roomId).emit("battlemap:tokenImageUpdated", { tokenId, imageUrl: null });
+  });
+
   socket.on("disconnect", () => {
     leaveRoom(socket, socket.data.roomId);
     for (const [requestId, pending] of pendingJoins) {
