@@ -27,8 +27,6 @@ export default function DiceTray({ rolls, onRoll }: Props) {
   // -die roll (the overwhelmingly common case) never involves this at all.
   const [addedDice, setAddedDice] = useState<{ diceType: DiceType; count: number }[]>([]);
 
-  const isD20AdvEligible = diceType === "d20" && count === 1 && addedDice.length === 0;
-
   function applyCustomSides() {
     const n = parseInt(customSides, 10);
     if (!customSides || isNaN(n) || n < CUSTOM_DICE_MIN_SIDES || n > CUSTOM_DICE_MAX_SIDES) {
@@ -137,15 +135,13 @@ export default function DiceTray({ rolls, onRoll }: Props) {
           </div>
         )}
 
-        {isD20AdvEligible && (
-          <div className="mode-row">
-            {(["normal", "advantage", "disadvantage"] as const).map((m) => (
-              <button key={m} className={`mode ${mode === m ? "active" : ""}`} onClick={() => setMode(m)}>
-                {m}
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="mode-row">
+          {(["normal", "advantage", "disadvantage"] as const).map((m) => (
+            <button key={m} className={`mode ${mode === m ? "active" : ""}`} onClick={() => setMode(m)}>
+              {m}
+            </button>
+          ))}
+        </div>
 
         <button
           className="roll-btn"
@@ -154,13 +150,14 @@ export default function DiceTray({ rolls, onRoll }: Props) {
               diceType,
               count,
               modifier,
-              mode: isD20AdvEligible ? mode : "normal",
+              mode,
               extraDice: addedDice.length > 0 ? addedDice : undefined,
             });
           }}
         >
           Roll {[...addedDice, { diceType, count }].map((d) => `${d.count > 1 ? d.count : ""}${d.diceType}`).join(" + ")}
           {modifier ? (modifier > 0 ? ` +${modifier}` : ` ${modifier}`) : ""}
+          {mode !== "normal" ? ` (${mode})` : ""}
         </button>
       </div>
 
@@ -169,7 +166,7 @@ export default function DiceTray({ rolls, onRoll }: Props) {
         <div className="feed-scroll">
           {rolls.length === 0 && <p className="empty">No rolls yet — the table is quiet.</p>}
           {[...rolls].reverse().map((r) => (
-            <div key={r.id} className="roll-card" style={{ borderLeftColor: r.user.color }}>
+            <div key={r.id} className={`roll-card ${r.advantageRolls ? "adv" : ""}`} style={{ borderLeftColor: r.user.color }}>
               <div className="roll-meta">
                 <span className="who" style={{ color: r.user.color }}>{r.user.name}</span>
                 <span className="what">
@@ -180,14 +177,33 @@ export default function DiceTray({ rolls, onRoll }: Props) {
                   {r.request.modifier ? (r.request.modifier > 0 ? ` +${r.request.modifier}` : ` ${r.request.modifier}`) : ""}
                 </span>
               </div>
-              <div className="roll-result">
-                <span className="total">{r.total}</span>
-                <span className="breakdown">
-                  {r.breakdown
-                    ? r.breakdown.map((g) => `${g.diceType}: [${g.values.join(", ")}]`).join("  ")
-                    : `[${r.rolls.join(", ")}]`}
-                </span>
-              </div>
+              {r.advantageRolls ? (
+                // Both complete attempts are always shown, never just the
+                // winner — TavernTable is built around everyone at the
+                // table being able to see what was actually rolled.
+                <div className="adv-rolls">
+                  {r.advantageRolls.map((attempt, i) => (
+                    <div key={i} className={`adv-attempt ${attempt.selected ? "selected" : ""}`}>
+                      <span className="adv-roll-label">
+                        Roll {i + 1}{attempt.selected ? ` — ${r.request.mode === "advantage" ? "ADVANTAGE" : "DISADVANTAGE"}` : ""}
+                      </span>
+                      <span className="adv-detail">
+                        {attempt.breakdown.map((g) => `${g.diceType}: [${g.values.join(", ")}]`).join("  ")}
+                      </span>
+                      <span className="adv-total">{attempt.total}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="roll-result">
+                  <span className="total">{r.total}</span>
+                  <span className="breakdown">
+                    {r.breakdown
+                      ? r.breakdown.map((g) => `${g.diceType}: [${g.values.join(", ")}]`).join("  ")
+                      : `[${r.rolls.join(", ")}]`}
+                  </span>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -368,12 +384,40 @@ export default function DiceTray({ rolls, onRoll }: Props) {
           align-items: center;
           justify-content: space-between;
         }
+        .roll-card.adv {
+          flex-direction: column;
+          align-items: stretch;
+          gap: 6px;
+        }
         .roll-meta { display: flex; flex-direction: column; gap: 2px; }
         .who { font-family: var(--font-mono); font-size: 12px; font-weight: 700; }
         .what { font-size: 12px; color: var(--parchment-dim); }
         .roll-result { display: flex; align-items: baseline; gap: 8px; }
         .total { font-family: var(--font-display); font-size: 22px; color: var(--parchment); }
         .breakdown { font-family: var(--font-mono); font-size: 11px; color: var(--parchment-dim); }
+        .adv-rolls { display: flex; flex-direction: column; gap: 4px; }
+        .adv-attempt {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 4px 8px;
+          border-radius: 3px;
+          border: 1px solid transparent;
+        }
+        .adv-attempt.selected { border-color: var(--gold); background: rgba(201, 162, 39, 0.08); }
+        .adv-roll-label {
+          font-family: var(--font-mono);
+          font-size: 10px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          color: var(--parchment-dim);
+          white-space: nowrap;
+        }
+        .adv-attempt.selected .adv-roll-label { color: var(--gold); font-weight: 700; }
+        .adv-detail { font-family: var(--font-mono); font-size: 11px; color: var(--parchment-dim); flex: 1; }
+        .adv-total { font-family: var(--font-display); font-size: 18px; color: var(--parchment); }
+        .adv-attempt.selected .adv-total { color: var(--gold); }
       `}</style>
     </section>
   );

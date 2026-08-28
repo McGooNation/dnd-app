@@ -45,6 +45,21 @@ function rollOne(sides: number): number {
 // of separate groups.
 const MAX_DICE_GROUPS = 10;
 
+/** Rolls one complete pass over every dice group — used both for a normal
+ * roll and, twice, for advantage/disadvantage (see below). */
+function rollGroups(groups: { diceType: DiceType; count: number }[]) {
+  const breakdown: { diceType: DiceType; values: number[] }[] = [];
+  const allRolls: number[] = [];
+  for (const group of groups) {
+    const sides = sidesFor(group.diceType)!; // already validated by the caller
+    const count = Math.max(1, Math.min(group.count ?? 1, 100)); // same sanity cap as before, per group
+    const values = Array.from({ length: count }, () => rollOne(sides));
+    breakdown.push({ diceType: group.diceType, values });
+    allRolls.push(...values);
+  }
+  return { breakdown, rolls: allRolls, sum: allRolls.reduce((sum, r) => sum + r, 0) };
+}
+
 /**
  * Executes a roll request and returns the individual dice + computed total.
  * IMPORTANT: this should always run on the server, not trusted from a client,
@@ -54,10 +69,24 @@ const MAX_DICE_GROUPS = 10;
  * extraDice groups — each rolled independently and combined into one total.
  * For the common case (no extraDice), this behaves exactly as it always has;
  * `breakdown` is only included when there's genuinely more than one group.
+ *
+ * Advantage/disadvantage: traditionally a single-d20 mechanic (roll twice,
+ * keep the higher/lower single die). Here it's intentionally generalized to
+ * work with *any* dice combination — the entire combination (every group,
+ * with the modifier applied) is rolled twice as two complete, independent
+ * attempts, and the higher (advantage) or lower (disadvantage) COMPLETE
+ * TOTAL is used. This is never done per-die (e.g. "1d10 + 1d12" under
+ * advantage is never "the higher d10 paired with the higher d12") — always
+ * two full attempts, compared as wholes. Both complete attempts are
+ * returned (via `advantageRolls`), never just the winner, since TavernTable
+ * is built around everyone at the table being able to see what was rolled.
  */
-export function executeRoll(
-  request: RollRequest
-): { rolls: number[]; total: number; breakdown?: { diceType: DiceType; values: number[] }[] } {
+export function executeRoll(request: RollRequest): {
+  rolls: number[];
+  total: number;
+  breakdown?: { diceType: DiceType; values: number[] }[];
+  advantageRolls?: { breakdown: { diceType: DiceType; values: number[] }[]; total: number; selected: boolean }[];
+} {
   const groups = [{ diceType: request.diceType, count: request.count }, ...(request.extraDice ?? [])];
 
   if (groups.length > MAX_DICE_GROUPS) {
@@ -73,33 +102,39 @@ export function executeRoll(
 
   const modifier = request.modifier ?? 0;
 
-  // Advantage/disadvantage is a single-die-type d20 mechanic — only
-  // meaningful (and only ever sent by the UI) when there's exactly one
-  // group, i.e. no extra dice were added to the roll. Completely unchanged
-  // from before this feature existed.
-  if ((request.mode === "advantage" || request.mode === "disadvantage") && groups.length === 1) {
-    const sides = sidesFor(groups[0].diceType)!;
-    const a = rollOne(sides);
-    const b = rollOne(sides);
-    const chosen = request.mode === "advantage" ? Math.max(a, b) : Math.min(a, b);
-    return { rolls: [a, b], total: chosen + modifier };
+  if (request.mode === "advantage" || request.mode === "disadvantage") {
+    const attempt1 = rollGroups(groups);
+    const attempt2 = rollGroups(groups);
+    const total1 = attempt1.sum + modifier;
+    const total2 = attempt2.sum + modifier;
+    // Ties are resolved in favor of the first attempt — arbitrary but
+    // deterministic, and irrelevant to the actual result since the totals
+    // are equal either way.
+    const firstWins = request.mode === "advantage" ? total1 >= total2 : total1 <= total2;
+    const winner = firstWins ? attempt1 : attempt2;
+    const winnerTotal = firstWins ? total1 : total2;
+
+    return {
+      // Kept populated (from the winning attempt) so anything that only
+      // knows about the older rolls/total/breakdown shape still gets a
+      // sensible, correct result — advantageRolls is the new, additive part.
+      rolls: winner.rolls,
+      total: winnerTotal,
+      breakdown: winner.breakdown,
+      advantageRolls: [
+        { breakdown: attempt1.breakdown, total: total1, selected: firstWins },
+        { breakdown: attempt2.breakdown, total: total2, selected: !firstWins },
+      ],
+    };
   }
 
-  const breakdown: { diceType: DiceType; values: number[] }[] = [];
-  const allRolls: number[] = [];
-  for (const group of groups) {
-    const sides = sidesFor(group.diceType)!;
-    const count = Math.max(1, Math.min(group.count ?? 1, 100)); // same sanity cap as before, per group
-    const values = Array.from({ length: count }, () => rollOne(sides));
-    breakdown.push({ diceType: group.diceType, values });
-    allRolls.push(...values);
-  }
-  const total = allRolls.reduce((sum, r) => sum + r, 0) + modifier;
+  const result = rollGroups(groups);
+  const total = result.sum + modifier;
 
   // Only attach breakdown when there's genuinely more than one group — this
   // is what keeps a normal single-type roll (the overwhelmingly common case)
   // producing the exact same result shape it always has.
-  return groups.length > 1 ? { rolls: allRolls, total, breakdown } : { rolls: allRolls, total };
+  return groups.length > 1 ? { rolls: result.rolls, total, breakdown: result.breakdown } : { rolls: result.rolls, total };
 }
 
 /** Assigns a stable-looking but random accent color to a new user. */

@@ -798,20 +798,39 @@ function RoomScreen({
             keyExtractor={(r) => r.id}
             renderItem={({ item }) => (
               <View style={[styles.rollCard, { borderLeftColor: item.user.color }]}>
-                <View>
+                <View style={{ flex: 1 }}>
                   <Text style={[styles.rollWho, { color: item.user.color }]}>{item.user.name}</Text>
                   <Text style={styles.rollWhat}>
                     {item.breakdown
                       ? item.breakdown.map((g) => `${g.values.length > 1 ? g.values.length : ""}${g.diceType}`).join(" + ")
                       : `${item.request.count > 1 ? item.request.count : ""}${item.request.diceType}`}
+                    {item.request.mode !== "normal" ? ` (${item.request.mode})` : ""}
                   </Text>
-                  {item.breakdown && (
+                  {item.breakdown && !item.advantageRolls && (
                     <Text style={styles.rollWhat}>
                       {item.breakdown.map((g) => `${g.diceType}: [${g.values.join(", ")}]`).join("  ")}
                     </Text>
                   )}
+                  {item.advantageRolls && (
+                    // Both complete attempts are always shown, never just the
+                    // winner — TavernTable is built around everyone at the
+                    // table being able to see what was actually rolled.
+                    <View style={{ marginTop: 4 }}>
+                      {item.advantageRolls.map((attempt, i) => (
+                        <View key={i} style={attempt.selected ? styles.advAttemptSelected : styles.advAttempt}>
+                          <Text style={attempt.selected ? styles.advLabelSelected : styles.advLabel}>
+                            Roll {i + 1}
+                            {attempt.selected ? ` — ${item.request.mode === "advantage" ? "ADVANTAGE" : "DISADVANTAGE"}` : ""}
+                            {": "}
+                            {attempt.breakdown.map((g) => `${g.diceType}: [${g.values.join(", ")}]`).join("  ")}
+                            {` = ${attempt.total}`}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
-                <Text style={styles.rollTotal}>{item.total}</Text>
+                {!item.advantageRolls && <Text style={styles.rollTotal}>{item.total}</Text>}
               </View>
             )}
             ListEmptyComponent={<Text style={styles.emptyText}>No rolls yet.</Text>}
@@ -1639,6 +1658,17 @@ const styles = StyleSheet.create({
   rollWho: { fontSize: 13, fontWeight: "700" },
   rollWhat: { color: COLORS.parchmentDim, fontSize: 12, marginTop: 2 },
   rollTotal: { color: COLORS.parchment, fontSize: 24, fontWeight: "700" },
+  advAttempt: { paddingVertical: 3 },
+  advAttemptSelected: {
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: COLORS.gold,
+    backgroundColor: "rgba(201, 162, 39, 0.08)",
+  },
+  advLabel: { color: COLORS.parchmentDim, fontSize: 11 },
+  advLabelSelected: { color: COLORS.gold, fontSize: 11, fontWeight: "700" },
   msgRow: { flexDirection: "row", marginBottom: 10 },
   msgWho: { fontWeight: "700", fontSize: 14 },
   msgText: { color: COLORS.parchment, fontSize: 14, flexShrink: 1 },

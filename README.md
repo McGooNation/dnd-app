@@ -32,11 +32,22 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
     behavior render exactly as they did before. Results include a
     per-die-type breakdown (only when more than one type was rolled) so
     everyone can see exactly what each die showed, not just the total.
-    Advantage/disadvantage stays a single-d20 mechanic, as before — the
-    option only appears when there's just one die type selected.
     Mobile currently displays multi-type rolls made by others correctly,
     but building one is a web-only capability for now (mobile's dice tab
     doesn't yet have the count/modifier controls this extends).
+  - **Normal / Advantage / Disadvantage now work for any roll**, not just a
+    single d20 — the traditional d20 case still works exactly as it always
+    has, and the same idea now generalizes to any dice combination: the
+    *entire* combination (every die, modifier included) is rolled twice as
+    two complete, independent attempts, and the higher (Advantage) or lower
+    (Disadvantage) **complete total** is used — never a per-die comparison
+    (e.g. Advantage on "1d10 + 1d12" is never "the higher d10 paired with
+    the higher d12"). Both complete attempts are always shown, with the
+    chosen one clearly marked, since TavernTable is built around everyone
+    at the table seeing what was actually rolled. Purely additive on the
+    wire (a new optional `advantageRolls` field) — a Normal roll, and any
+    advantage/disadvantage roll made before this existed, render exactly as
+    they always have.
 - Email/password accounts, alongside guest access:
   - Register/login at `/auth/register` and `/auth/login`; a saved login session
     is restored automatically on the next visit (localStorage on web,

@@ -46,6 +46,14 @@ export interface RollResult {
   // "d6 = 4, d6 = 2, d8 = 7" style display. Absent for every existing/simple
   // roll — old saved history and single-type rolls render exactly as before.
   breakdown?: { diceType: DiceType; values: number[] }[];
+  // Present only for an advantage/disadvantage roll made after this field
+  // was added — the two COMPLETE attempts that were rolled and compared
+  // (modifier already applied to each), so everyone can see both, not just
+  // the winner. Exactly one entry has `selected: true`. Absent for a Normal
+  // roll, and absent for advantage/disadvantage rolls made before this
+  // existed — those still render correctly using the older rolls/total
+  // fields alone (see DiceTray.tsx's fallback rendering).
+  advantageRolls?: { breakdown: { diceType: DiceType; values: number[] }[]; total: number; selected: boolean }[];
   timestamp: number;
 }
 

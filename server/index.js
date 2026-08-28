@@ -106,12 +106,36 @@ function rollInitiativeRequest(modifier = 0) {
   return { diceType: "d20", count: 1, modifier };
 }
 
+/** Rolls one complete pass over every dice group — used both for a normal
+ * roll and, twice, for advantage/disadvantage (see below). */
+function rollGroups(groups) {
+  const breakdown = [];
+  const allRolls = [];
+  for (const group of groups) {
+    const sides = sidesFor(group.diceType); // already validated by the caller
+    const count = Math.max(1, Math.min(group.count || 1, 100));
+    const values = Array.from({ length: count }, () => rollOne(sides));
+    breakdown.push({ diceType: group.diceType, values });
+    allRolls.push(...values);
+  }
+  return { breakdown, rolls: allRolls, sum: allRolls.reduce((sum, r) => sum + r, 0) };
+}
+
 /** A request is one or more "groups" — the primary diceType/count, plus any
  * extraDice groups — each rolled independently and combined into one total.
  * For the common case (no extraDice), this behaves exactly as it always
  * has; `breakdown` is only included when there's genuinely more than one
  * group. Mirrors packages/shared/src/dice.ts — see that file's header
- * comment for why this duplication exists. */
+ * comment for why this duplication exists.
+ *
+ * Advantage/disadvantage: traditionally a single-d20 mechanic (roll twice,
+ * keep the higher/lower single die). Here it's intentionally generalized to
+ * work with *any* dice combination — the entire combination (every group,
+ * with the modifier applied) is rolled twice as two complete, independent
+ * attempts, and the higher (advantage) or lower (disadvantage) COMPLETE
+ * TOTAL is used — never per-die. Both complete attempts are returned (via
+ * `advantageRolls`), never just the winner, since TavernTable is built
+ * around everyone at the table being able to see what was rolled. */
 function executeRoll(request) {
   const groups = [{ diceType: request.diceType, count: request.count }, ...(request.extraDice || [])];
 
@@ -128,26 +152,30 @@ function executeRoll(request) {
 
   const modifier = request.modifier || 0;
 
-  if ((request.mode === "advantage" || request.mode === "disadvantage") && groups.length === 1) {
-    const sides = sidesFor(groups[0].diceType);
-    const a = rollOne(sides);
-    const b = rollOne(sides);
-    const chosen = request.mode === "advantage" ? Math.max(a, b) : Math.min(a, b);
-    return { rolls: [a, b], total: chosen + modifier };
+  if (request.mode === "advantage" || request.mode === "disadvantage") {
+    const attempt1 = rollGroups(groups);
+    const attempt2 = rollGroups(groups);
+    const total1 = attempt1.sum + modifier;
+    const total2 = attempt2.sum + modifier;
+    const firstWins = request.mode === "advantage" ? total1 >= total2 : total1 <= total2;
+    const winner = firstWins ? attempt1 : attempt2;
+    const winnerTotal = firstWins ? total1 : total2;
+
+    return {
+      rolls: winner.rolls,
+      total: winnerTotal,
+      breakdown: winner.breakdown,
+      advantageRolls: [
+        { breakdown: attempt1.breakdown, total: total1, selected: firstWins },
+        { breakdown: attempt2.breakdown, total: total2, selected: !firstWins },
+      ],
+    };
   }
 
-  const breakdown = [];
-  const allRolls = [];
-  for (const group of groups) {
-    const sides = sidesFor(group.diceType);
-    const count = Math.max(1, Math.min(group.count || 1, 100));
-    const values = Array.from({ length: count }, () => rollOne(sides));
-    breakdown.push({ diceType: group.diceType, values });
-    allRolls.push(...values);
-  }
-  const total = allRolls.reduce((sum, r) => sum + r, 0) + modifier;
+  const result = rollGroups(groups);
+  const total = result.sum + modifier;
 
-  return groups.length > 1 ? { rolls: allRolls, total, breakdown } : { rolls: allRolls, total };
+  return groups.length > 1 ? { rolls: result.rolls, total, breakdown: result.breakdown } : { rolls: result.rolls, total };
 }
 
 const app = express();
@@ -491,7 +519,7 @@ io.on("connection", (socket) => {
     }
 
     try {
-      const { rolls, total, breakdown } = executeRoll(request);
+      const { rolls, total, breakdown, advantageRolls } = executeRoll(request);
       const result = {
         id: uuid(),
         roomId,
@@ -502,6 +530,7 @@ io.on("connection", (socket) => {
         timestamp: Date.now(),
       };
       if (breakdown) result.breakdown = breakdown;
+      if (advantageRolls) result.advantageRolls = advantageRolls;
       if (room.lobbyId) lobbyStore.appendRoll(room.lobbyId, result);
       // Broadcast to everyone in the room, including the roller — this is the
       // "everyone can see what you roll" requirement.
