@@ -269,19 +269,21 @@ export default function BattleMap({
                 startDrag(t.id);
               }}
             >
-              <span className="token-inner" style={{ color: getContrastTextColor(t.color) }}>
-                {t.label.slice(0, 2).toUpperCase()}
-              </span>
-              {t.imageUrl && !imageLoadFailed.has(t.imageUrl) && (
-                <img
-                  key={t.imageUrl}
-                  src={t.imageUrl}
-                  alt={t.label}
-                  className="token-image"
-                  draggable={false}
-                  onError={() => setImageLoadFailed((prev) => new Set(prev).add(t.imageUrl!))}
-                />
-              )}
+              <div className="token-face">
+                <span className="token-inner" style={{ color: getContrastTextColor(t.color) }}>
+                  {t.label.slice(0, 2).toUpperCase()}
+                </span>
+                {t.imageUrl && !imageLoadFailed.has(t.imageUrl) && (
+                  <img
+                    key={t.imageUrl}
+                    src={t.imageUrl}
+                    alt={t.label}
+                    className="token-image"
+                    draggable={false}
+                    onError={() => setImageLoadFailed((prev) => new Set(prev).add(t.imageUrl!))}
+                  />
+                )}
+              </div>
               {showTokenNames && <span className="token-label">{t.label}</span>}
             </div>
           );
@@ -384,10 +386,18 @@ export default function BattleMap({
           box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
           user-select: none;
           touch-action: none;
-          overflow: hidden;
         }
         .token.monster, .token.npc { border-radius: 6px; }
         .token.selected { outline: 2px solid var(--gold); outline-offset: 2px; }
+        .token-face {
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          overflow: hidden;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
         .token-image {
           position: absolute;
           inset: 0;

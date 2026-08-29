@@ -1469,22 +1469,24 @@ function DraggableToken({
         selected && styles.mapTokenSelected,
       ]}
     >
-      {showImage ? (
-        // The image fills the token exactly and is clipped to its existing
-        // shape (mapToken/mapTokenSquare already set overflow: hidden) —
-        // the clickable/draggable area is entirely controlled by the outer
-        // View's size above, completely unaffected by the image itself.
-        <Image
-          source={{ uri: token.imageUrl! }}
-          style={StyleSheet.absoluteFill}
-          resizeMode="cover"
-          onError={() => setImageFailed(true)}
-        />
-      ) : (
-        <Text style={[styles.mapTokenInner, { color: getContrastTextColor(token.color) }]}>
-          {token.label.slice(0, 2).toUpperCase()}
-        </Text>
-      )}
+      <View style={[styles.mapTokenFace, token.type !== "player" && styles.mapTokenFaceSquare]}>
+        {showImage ? (
+          // The image fills the token exactly and is clipped to its
+          // existing shape (mapTokenFace sets overflow: hidden) — the
+          // clickable/draggable area is entirely controlled by the outer
+          // View's size above, completely unaffected by the image itself.
+          <Image
+            source={{ uri: token.imageUrl! }}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <Text style={[styles.mapTokenInner, { color: getContrastTextColor(token.color) }]}>
+            {token.label.slice(0, 2).toUpperCase()}
+          </Text>
+        )}
+      </View>
       {showLabel && <Text style={styles.mapTokenLabel} numberOfLines={1}>{token.label}</Text>}
     </View>
   );
@@ -1939,9 +1941,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 2,
     borderColor: COLORS.ink,
-    overflow: "hidden",
   },
   mapTokenSquare: { borderRadius: 6 },
+  mapTokenFace: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 16,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mapTokenFaceSquare: { borderRadius: 6 },
   mapTokenSelected: { borderColor: COLORS.gold, borderWidth: 2 },
   mapTokenInner: { fontSize: 11, fontWeight: "700" },
   mapTokenLabel: {
