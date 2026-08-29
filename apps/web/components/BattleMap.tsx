@@ -102,30 +102,6 @@ export default function BattleMap({
   // the end of a drag gesture — mirrors how token dragging already
   // suppresses its own trailing click via stopPropagation.
   const suppressNextClickRef = useRef(false);
-  // The map image's own natural width/height ratio — needed so tokens can
-  // be positioned relative to where the image is ACTUALLY rendered (see
-  // .map-image-frame below), not the surrounding container. Re-derived
-  // whenever the image itself changes; this reads a data URL already held
-  // in memory, so it's not a network fetch, just a decode.
-  const [imageAspect, setImageAspect] = useState<number | null>(null);
-  useEffect(() => {
-    const url = battleMap?.mode === "image" ? battleMap.imageDataUrl : null;
-    if (!url) {
-      setImageAspect(null);
-      return;
-    }
-    let cancelled = false;
-    const img = new Image();
-    img.onload = () => {
-      if (!cancelled && img.naturalWidth && img.naturalHeight) {
-        setImageAspect(img.naturalWidth / img.naturalHeight);
-      }
-    };
-    img.src = url;
-    return () => {
-      cancelled = true;
-    };
-  }, [battleMap?.mode, battleMap?.imageDataUrl]);
 
   const mode = battleMap?.mode ?? "grid";
   const tokens = battleMap?.tokens ?? [];
@@ -345,103 +321,6 @@ export default function BattleMap({
     window.addEventListener("touchend", stop);
   }
 
-  // Extracted so the exact same tokens + toolbar render inside whichever
-  // element is the correct coordinate host for the current mode (the plain
-  // map-content box for grid mode, or the aspect-ratio-correct image frame
-  // for image mode) without duplicating this block for each.
-  const tokensAndToolbar = (
-    <>
-      {tokens.map((t: Token) => {
-        const scale = SIZE_SCALE[t.size] ?? 1;
-        const size = BASE_TOKEN_SIZE * scale;
-        return (
-          <div
-            key={t.id}
-            className={`token ${t.type} ${selectedTokenId === t.id ? "selected" : ""}`}
-            style={{
-              left: `${t.x}%`,
-              top: `${t.y}%`,
-              width: size,
-              height: size,
-              background: t.color,
-            }}
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              if (e.button !== 0) return; // only the primary button starts a drag
-              startDrag(t.id);
-            }}
-            onClick={(e) => {
-              // The browser fires a native "click" after mouseup even though
-              // mousedown already stopped its own propagation — without this,
-              // that click bubbles to the map area's onClick and immediately
-              // clears the selection this same interaction just set.
-              e.stopPropagation();
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault(); // show our toolbar instead of the browser's menu
-              e.stopPropagation();
-              setSelectedTokenId(t.id);
-            }}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              startDrag(t.id);
-            }}
-          >
-            <div className="token-face">
-              <span className="token-inner" style={{ color: getContrastTextColor(t.color) }}>
-                {t.label.slice(0, 2).toUpperCase()}
-              </span>
-              {t.imageUrl && !imageLoadFailed.has(t.imageUrl) && (
-                <img
-                  key={t.imageUrl}
-                  src={t.imageUrl}
-                  alt={t.label}
-                  className="token-image"
-                  draggable={false}
-                  onError={() => setImageLoadFailed((prev) => new Set(prev).add(t.imageUrl!))}
-                />
-              )}
-            </div>
-            {showTokenNames && <span className="token-label">{t.label}</span>}
-          </div>
-        );
-      })}
-
-      {selectedToken && (
-        <div
-          className="toolbar-anchor"
-          style={{
-            left: `${selectedToken.x}%`,
-            top: `${selectedToken.y}%`,
-            // Keeps the toolbar a constant, readable size regardless of
-            // map zoom — otherwise it would visually grow right along
-            // with everything else in this transformed layer (fine for a
-            // token, not for UI controls). translate's own offset isn't
-            // affected by the scale() that follows it, so this still
-            // tracks the token correctly at any zoom level.
-            transform: `translate(-50%, 28px) scale(${1 / zoom})`,
-          }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-          onContextMenu={(e) => e.preventDefault()}
-          onTouchStart={(e) => e.stopPropagation()}
-        >
-          <ContextToolbar
-            token={selectedToken}
-            onRemove={() => {
-              onRemoveToken(selectedToken.id);
-              setSelectedTokenId(null);
-            }}
-            onColorChange={(hex) => onUpdateToken(selectedToken.id, { color: hex })}
-            onSizeChange={(size) => onUpdateToken(selectedToken.id, { size })}
-            onSetImage={(dataUrl) => onSetTokenImage(selectedToken.id, dataUrl)}
-            onRemoveImage={() => onRemoveTokenImage(selectedToken.id)}
-          />
-        </div>
-      )}
-    </>
-  );
-
   return (
     <div className="wrap">
       <div className="controls">
@@ -525,7 +404,7 @@ export default function BattleMap({
 
       <div ref={viewportRef} className="map-area">
         <div
-          ref={mode === "grid" ? containerRef : undefined}
+          ref={containerRef}
           className="map-content"
           onMouseDown={handleMapMouseDown}
           onClick={() => {
@@ -538,39 +417,101 @@ export default function BattleMap({
           style={{
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transformOrigin: "0 0",
+            ...(mode === "image" && battleMap?.imageDataUrl ? { backgroundImage: `url(${battleMap.imageDataUrl})` } : {}),
           }}
         >
-          {mode === "grid" ? (
-            <>
-              <div className="grid-overlay" />
-              {tokensAndToolbar}
-            </>
-          ) : (
-            // Sized/centered exactly the way background-size:contain would
-            // render the image (same idea, applied to a real element this
-            // time) — so this box's own bounds are precisely where the
-            // image is actually visible, regardless of the surrounding
-            // container's own size or aspect ratio. Tokens are positioned
-            // as a percentage of THIS frame, not the outer container — this
-            // is the actual fix: previously they were percentages of the
-            // full map-content box, which only matched the image's real
-            // position when the container happened to share the image's
-            // aspect ratio (never guaranteed, and different between Normal
-            // and Expanded Map View, which is what produced the mismatch).
+          {mode === "grid" && <div className="grid-overlay" />}
+
+          {tokens.map((t: Token) => {
+            const scale = SIZE_SCALE[t.size] ?? 1;
+            const size = BASE_TOKEN_SIZE * scale;
+            return (
+              <div
+                key={t.id}
+                className={`token ${t.type} ${selectedTokenId === t.id ? "selected" : ""}`}
+                style={{
+                  left: `${t.x}%`,
+                  top: `${t.y}%`,
+                  width: size,
+                  height: size,
+                  background: t.color,
+                }}
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  if (e.button !== 0) return; // only the primary button starts a drag
+                  startDrag(t.id);
+                }}
+                onClick={(e) => {
+                  // The browser fires a native "click" after mouseup even though
+                  // mousedown already stopped its own propagation — without this,
+                  // that click bubbles to the map area's onClick and immediately
+                  // clears the selection this same interaction just set.
+                  e.stopPropagation();
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault(); // show our toolbar instead of the browser's menu
+                  e.stopPropagation();
+                  setSelectedTokenId(t.id);
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  startDrag(t.id);
+                }}
+              >
+                <div className="token-face">
+                  <span className="token-inner" style={{ color: getContrastTextColor(t.color) }}>
+                    {t.label.slice(0, 2).toUpperCase()}
+                  </span>
+                  {t.imageUrl && !imageLoadFailed.has(t.imageUrl) && (
+                    <img
+                      key={t.imageUrl}
+                      src={t.imageUrl}
+                      alt={t.label}
+                      className="token-image"
+                      draggable={false}
+                      onError={() => setImageLoadFailed((prev) => new Set(prev).add(t.imageUrl!))}
+                    />
+                  )}
+                </div>
+                {showTokenNames && <span className="token-label">{t.label}</span>}
+              </div>
+            );
+          })}
+
+          {selectedToken && (
             <div
-              ref={containerRef}
-              className="map-image-frame"
+              className="toolbar-anchor"
               style={{
-                aspectRatio: imageAspect ? String(imageAspect) : undefined,
-                backgroundImage: battleMap?.imageDataUrl ? `url(${battleMap.imageDataUrl})` : undefined,
+                left: `${selectedToken.x}%`,
+                top: `${selectedToken.y}%`,
+                // Keeps the toolbar a constant, readable size regardless of
+                // map zoom — otherwise it would visually grow right along
+                // with everything else in this transformed layer (fine for a
+                // token, not for UI controls). translate's own offset isn't
+                // affected by the scale() that follows it, so this still
+                // tracks the token correctly at any zoom level.
+                transform: `translate(-50%, 28px) scale(${1 / zoom})`,
               }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+              onTouchStart={(e) => e.stopPropagation()}
             >
-              {tokensAndToolbar}
+              <ContextToolbar
+                token={selectedToken}
+                onRemove={() => {
+                  onRemoveToken(selectedToken.id);
+                  setSelectedTokenId(null);
+                }}
+                onColorChange={(hex) => onUpdateToken(selectedToken.id, { color: hex })}
+                onSizeChange={(size) => onUpdateToken(selectedToken.id, { size })}
+                onSetImage={(dataUrl) => onSetTokenImage(selectedToken.id, dataUrl)}
+                onRemoveImage={() => onRemoveTokenImage(selectedToken.id)}
+              />
             </div>
           )}
         </div>
       </div>
-
 
       <style jsx>{`
         .wrap { display: flex; flex-direction: column; height: 100%; }
@@ -627,17 +568,10 @@ export default function BattleMap({
           position: relative;
           width: 100%;
           height: 100%;
-          cursor: grab;
-        }
-        .map-image-frame {
-          position: absolute;
-          inset: 0;
-          margin: auto;
-          max-width: 100%;
-          max-height: 100%;
           background-size: contain;
           background-repeat: no-repeat;
           background-position: center;
+          cursor: grab;
         }
         .grid-overlay {
           position: absolute;

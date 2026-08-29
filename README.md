@@ -239,26 +239,6 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
     collapses to exactly `{x:0, y:0}` at 100% zoom. The context toolbar
     counter-scales itself so it stays a normal, readable size rather than
     growing right along with a 3–4x zoomed map.
-  - **Token positions are anchored to the actual uploaded map image, not
-    the surrounding container.** For an uploaded map, `background-size:
-    contain` (used so the image is never distorted) letterboxes it
-    differently depending on the container's own aspect ratio — Normal
-    View and Expanded Map View aren't the same shape, so a token's stored
-    x/y percentage used to land in a visibly different spot on the image
-    in each. The fix: a dedicated inner element (`.map-image-frame`) is
-    sized and centered with the browser's own layout engine
-    (`aspect-ratio` + `max-width/height: 100%`, the same idea as
-    `background-size: contain` but as a real, measurable element) so its
-    own bounds are always exactly where the image is actually visible —
-    tokens are positioned as a percentage of *that* element, not the
-    outer box. Grid maps were never affected (no image, no letterboxing)
-    and render exactly as before. Verified directly: with a deliberately
-    non-square test image, a token's position relative to the real image
-    pixels matched exactly (0.000% drift) between a narrow and a very wide
-    container shape, standing in for Normal vs. Expanded View — the same
-    test against the old approach showed up to 59% drift, confirming the
-    bug was real and now isn't. No stored token data changed at all; this
-    is purely a client-side rendering correction.
   - **Remove from Map** asks for confirmation first, then removes the token
     from the board for everyone. It's not a permanent delete — a removed
     player can be re-added via "Add Player Token," a removed monster/NPC can
