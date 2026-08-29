@@ -208,6 +208,37 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
     normal Initiative button lives in the now-hidden Dice column, so a
     small twin of it floats next to "Exit Map View" only while expanded,
     opening the exact same (unmodified) initiative panel.
+  - **Local mouse-wheel zoom (100%–400%) and click-drag panning** on the
+    battle map (`apps/web/components/BattleMap.tsx`): scroll to zoom toward
+    the cursor, drag empty map space to pan once zoomed in, "Reset View" in
+    the map's own controls bar to snap back to 100%/centered. Same
+    local-only philosophy as everything else here — plain `useState`, zero
+    references anywhere in server or shared socket code, so it's
+    structurally impossible for a zoom or pan action to reach the network
+    or affect anyone else's screen, verified directly in testing (0.00px
+    drift on zoom-to-cursor across repeated zooms, all boundary conditions
+    held exactly). Implemented as a camera: a fixed-size viewport contains
+    an inner layer that gets `transform: translate() scale()` for the pan
+    and zoom — the map image, grid, and every token live inside that inner
+    layer completely unchanged, so nothing about token data or positions is
+    touched by zooming or panning. The existing token-drag code required NO
+    changes at all: it already computes a token's position as a percentage
+    of its container's real on-screen bounding box, and a browser's own
+    `getBoundingClientRect()` already accounts for CSS transforms
+    automatically — pointing that same, unmodified code at the new
+    transformed layer instead of the old fixed one was the entire fix,
+    confirmed by dragging a token to an exact pixel target while zoomed
+    and panned and finding it landed within 0.02px. Panning is only ever
+    triggered by a mousedown that reaches the map's own handler — since
+    tokens and the context toolbar already call `stopPropagation()` on
+    their own mousedown (the same mechanism that already separated "click a
+    token" from "click empty space" before this feature existed), a pan can
+    never begin on top of a token. Pan is bounded so the zoomed content
+    always fully covers the viewport — worked out from the viewport's own
+    actual measured size, not a guess about any particular screen — and
+    collapses to exactly `{x:0, y:0}` at 100% zoom. The context toolbar
+    counter-scales itself so it stays a normal, readable size rather than
+    growing right along with a 3–4x zoomed map.
   - **Remove from Map** asks for confirmation first, then removes the token
     from the board for everyone. It's not a permanent delete — a removed
     player can be re-added via "Add Player Token," a removed monster/NPC can

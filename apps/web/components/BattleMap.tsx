@@ -22,6 +22,27 @@ interface Props {
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const BASE_TOKEN_SIZE = 34; // px, at "medium"
 
+// Local view (zoom/pan) — never sent anywhere, never part of battleMap.
+// 100% is the floor; there's intentionally no way to zoom below the normal
+// default view. 4x is generous for inspecting detail without being so high
+// it stops being useful — easy to bump later, it's just this one constant.
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
+
+/** Keeps the (locally) transformed map content fully covering the (locally)
+ * fixed viewport — so a user can never pan far enough to see empty space
+ * past the map's edge. Pure function of the current viewport's own actual
+ * size, not a hardcoded assumption about any particular screen. At zoom 1
+ * this always collapses to exactly {x:0, y:0} — the map's normal position. */
+function clampPan(pan: { x: number; y: number }, zoom: number, viewportWidth: number, viewportHeight: number) {
+  const minX = viewportWidth * (1 - zoom);
+  const minY = viewportHeight * (1 - zoom);
+  return {
+    x: Math.min(0, Math.max(minX, pan.x)),
+    y: Math.min(0, Math.max(minY, pan.y)),
+  };
+}
+
 export default function BattleMap({
   battleMap,
   users,
@@ -35,7 +56,17 @@ export default function BattleMap({
   onSetTokenImage,
   onRemoveTokenImage,
 }: Props) {
+  // containerRef now points at the inner, zoom/pan-transformed content layer
+  // (not the outer fixed viewport) — see the render below. This is
+  // deliberate: getBoundingClientRect() on a transformed element already
+  // reflects that transform, so the EXISTING token-drag math further down
+  // (which measures this ref) keeps working completely unchanged, whether
+  // the map is zoomed/panned or not, with zero new coordinate math needed.
   const containerRef = useRef<HTMLDivElement>(null);
+  // The outer, fixed-size viewport — used only for wheel-zoom cursor math
+  // and pan boundary calculations, both of which need the map's stable,
+  // untransformed on-screen size and position.
+  const viewportRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Selection is intentionally local-only React state — never sent over the
   // socket, so each user can inspect a different token without affecting
@@ -56,6 +87,21 @@ export default function BattleMap({
   const [customType, setCustomType] = useState<"monster" | "npc">("monster");
   const [uploadError, setUploadError] = useState<string | null>(null);
   const draggingRef = useRef<{ tokenId: string; raf: number | null; lastPos: { x: number; y: number } | null } | null>(null);
+  // Local camera state — same philosophy as selection/showTokenNames above:
+  // never sent over the socket, never touches battleMap, purely this user's
+  // own view of the one shared map. Mirrored into refs (updated
+  // synchronously alongside every setState call below) so the wheel/pan
+  // handlers — native listeners set up once, not re-created on every zoom
+  // tick — always read the truly current value rather than a stale closure.
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const zoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
+  // Set for the duration of an actual pan drag so the click handler that
+  // normally deselects a token on empty-space clicks doesn't also fire at
+  // the end of a drag gesture — mirrors how token dragging already
+  // suppresses its own trailing click via stopPropagation.
+  const suppressNextClickRef = useRef(false);
 
   const mode = battleMap?.mode ?? "grid";
   const tokens = battleMap?.tokens ?? [];
@@ -100,6 +146,128 @@ export default function BattleMap({
     resizeImageFile(file)
       .then(onSetImage)
       .catch(() => setUploadError("Couldn't process that image — please try again."));
+  }
+
+  // Mouse-wheel zoom, toward the cursor. Uses a native (non-React) event
+  // listener attached directly to the viewport element, not JSX's onWheel —
+  // React attaches onWheel as a passive listener, which silently prevents
+  // preventDefault() from working, so the page would scroll underneath the
+  // map instead of the map zooming. Attaching natively, and scoped to just
+  // this element, is also what keeps this from affecting scrolling
+  // anywhere else on the page.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      const rect = viewport!.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12; // scroll up = zoom in
+      const currentZoom = zoomRef.current;
+      const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * factor));
+      if (newZoom === currentZoom) return; // already at a boundary
+
+      // Standard "zoom toward a point" approach: find what map-content point
+      // is currently under the cursor, then choose a new pan so that same
+      // point stays under the cursor after the zoom changes.
+      const currentPan = panRef.current;
+      const contentX = (mouseX - currentPan.x) / currentZoom;
+      const contentY = (mouseY - currentPan.y) / currentZoom;
+      const rawPan = { x: mouseX - contentX * newZoom, y: mouseY - contentY * newZoom };
+      const clamped = clampPan(rawPan, newZoom, rect.width, rect.height);
+
+      // Update refs immediately (not just via the mirroring effects below),
+      // so a burst of rapid wheel ticks — which can fire faster than React
+      // re-renders — always compute from the truly latest values.
+      zoomRef.current = newZoom;
+      panRef.current = clamped;
+      setZoom(newZoom);
+      setPan(clamped);
+    }
+
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
+  }, []);
+
+  useEffect(() => {
+    zoomRef.current = zoom;
+  }, [zoom]);
+  useEffect(() => {
+    panRef.current = pan;
+  }, [pan]);
+
+  // If the viewport itself resizes (e.g. entering/exiting Expanded Map
+  // View, or the browser window resizing) while zoomed/panned, re-check the
+  // pan boundaries against the new size — otherwise a pan that was valid
+  // for the old size could briefly show empty space past the map's edge in
+  // the new one.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      const clamped = clampPan(panRef.current, zoomRef.current, width, height);
+      if (clamped.x !== panRef.current.x || clamped.y !== panRef.current.y) {
+        panRef.current = clamped;
+        setPan(clamped);
+      }
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
+  function resetView() {
+    zoomRef.current = MIN_ZOOM;
+    panRef.current = { x: 0, y: 0 };
+    setZoom(MIN_ZOOM);
+    setPan({ x: 0, y: 0 });
+  }
+
+  // Click-and-drag panning on empty map space. Tokens and the context
+  // toolbar already call stopPropagation() in their own onMouseDown — the
+  // exact existing mechanism that already separates "clicking a token" from
+  // "clicking the map" — so this handler naturally only ever fires for a
+  // genuine empty-area mousedown, never one that started on a token.
+  function handleMapMouseDown(e: React.MouseEvent) {
+    if (e.button !== 0) return; // only the primary button pans
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    const startPan = panRef.current;
+    const currentZoom = zoomRef.current;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let moved = false;
+    let raf: number | null = null;
+    let pending: { x: number; y: number } | null = null;
+
+    function onMouseMove(ev: MouseEvent) {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+      if (!moved) return;
+      pending = clampPan({ x: startPan.x + dx, y: startPan.y + dy }, currentZoom, rect.width, rect.height);
+      if (raf) return; // throttle to one update per animation frame, same as token dragging
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        if (pending) {
+          panRef.current = pending;
+          setPan(pending);
+        }
+      });
+    }
+    function onMouseUp() {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      if (moved) suppressNextClickRef.current = true;
+    }
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
   }
 
   const handlePointerMove = useCallback(
@@ -221,17 +389,38 @@ export default function BattleMap({
             Show Token Names
           </label>
         </div>
+        <div className="control-group">
+          <button
+            className="ctrl-btn"
+            disabled={zoom === MIN_ZOOM && pan.x === 0 && pan.y === 0}
+            onClick={resetView}
+          >
+            Reset View
+          </button>
+        </div>
       </div>
 
       {uploadError && <p className="upload-error">{uploadError}</p>}
 
-      <div
-        ref={containerRef}
-        className="map-area"
-        onClick={() => setSelectedTokenId(null)}
-        style={mode === "image" && battleMap?.imageDataUrl ? { backgroundImage: `url(${battleMap.imageDataUrl})` } : undefined}
-      >
-        {mode === "grid" && <div className="grid-overlay" />}
+      <div ref={viewportRef} className="map-area">
+        <div
+          ref={containerRef}
+          className="map-content"
+          onMouseDown={handleMapMouseDown}
+          onClick={() => {
+            if (suppressNextClickRef.current) {
+              suppressNextClickRef.current = false;
+              return;
+            }
+            setSelectedTokenId(null);
+          }}
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "0 0",
+            ...(mode === "image" && battleMap?.imageDataUrl ? { backgroundImage: `url(${battleMap.imageDataUrl})` } : {}),
+          }}
+        >
+          {mode === "grid" && <div className="grid-overlay" />}
 
         {tokens.map((t: Token) => {
           const scale = SIZE_SCALE[t.size] ?? 1;
@@ -292,7 +481,17 @@ export default function BattleMap({
         {selectedToken && (
           <div
             className="toolbar-anchor"
-            style={{ left: `${selectedToken.x}%`, top: `${selectedToken.y}%` }}
+            style={{
+              left: `${selectedToken.x}%`,
+              top: `${selectedToken.y}%`,
+              // Keeps the toolbar a constant, readable size regardless of
+              // map zoom — otherwise it would visually grow right along
+              // with everything else in this transformed layer (fine for a
+              // token, not for UI controls). translate's own offset isn't
+              // affected by the scale() that follows it, so this still
+              // tracks the token correctly at any zoom level.
+              transform: `translate(-50%, 28px) scale(${1 / zoom})`,
+            }}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.preventDefault()}
@@ -311,6 +510,7 @@ export default function BattleMap({
             />
           </div>
         )}
+        </div>
       </div>
 
       <style jsx>{`
@@ -362,10 +562,16 @@ export default function BattleMap({
           flex: 1;
           min-height: 320px;
           background-color: var(--ink);
+          overflow: hidden;
+        }
+        .map-content {
+          position: relative;
+          width: 100%;
+          height: 100%;
           background-size: contain;
           background-repeat: no-repeat;
           background-position: center;
-          overflow: hidden;
+          cursor: grab;
         }
         .grid-overlay {
           position: absolute;
@@ -427,7 +633,6 @@ export default function BattleMap({
         }
         .toolbar-anchor {
           position: absolute;
-          transform: translate(-50%, 28px);
           z-index: 10;
         }
       `}</style>
