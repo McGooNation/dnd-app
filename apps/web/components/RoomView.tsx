@@ -78,6 +78,12 @@ export default function RoomView({
   // (fully shared) initiative data independently; see server/initiative.js
   // for where the actual shared data lives.
   const [initiativePanelOpen, setInitiativePanelOpen] = useState(false);
+  // Whether THIS user has expanded the battle map to fill the screen —
+  // exactly the same local-only pattern as initiativePanelOpen above, never
+  // sent to the server or synced to anyone else. Purely changes this user's
+  // own layout; the underlying shared battle map/token data is completely
+  // untouched by it.
+  const [mapExpanded, setMapExpanded] = useState(false);
   // A small, self-clearing toast for server-sent notices (e.g. rate limit
   // messages) — kept local to this component so it doesn't change how the
   // shared hook behaves for anything else.
@@ -207,7 +213,7 @@ export default function RoomView({
         />
       )}
 
-      <div className="body">
+      <div className={`body ${mapExpanded ? "map-expanded" : ""}`}>
         <div className="col-left">
           <button
             className={`initiative-btn ${initiativePanelOpen ? "active" : ""}`}
@@ -218,6 +224,24 @@ export default function RoomView({
           <DiceTray rolls={rolls} onRoll={rollDice} />
         </div>
         <div className="col-center">
+          <div className="map-view-controls">
+            {mapExpanded && (
+              // The normal Initiative button above lives inside col-left,
+              // which is hidden while the map is expanded — this small
+              // floating twin is the only way to reach the exact same
+              // (unchanged) InitiativePanel while in this view, per the
+              // requirement that it should stay reachable.
+              <button
+                className={`floating-btn ${initiativePanelOpen ? "active" : ""}`}
+                onClick={() => setInitiativePanelOpen((prev) => !prev)}
+              >
+                Initiative{initiative?.active ? ` · Round ${initiative.round}` : ""}
+              </button>
+            )}
+            <button className="floating-btn" onClick={() => setMapExpanded((prev) => !prev)}>
+              {mapExpanded ? "Exit Map View" : "Expand Map"}
+            </button>
+          </div>
           <BattleMap
             battleMap={battleMap}
             users={room?.users ?? []}
@@ -400,9 +424,41 @@ export default function RoomView({
           min-height: 0;
         }
         .col-left { gap: 1px; }
-        .col-center { min-height: 320px; }
+        .col-center { min-height: 320px; position: relative; }
         .col-right { min-height: 0; }
         .manage-wrap { padding: 20px 28px; }
+        /* Expanded Map View — purely local to this user (see mapExpanded
+         * state above), never sent to the server. Higher specificity than
+         * the media-query'd three-column rule above (a class combinator
+         * beats a plain element selector), so this correctly overrides it
+         * at any width. Hiding the side columns rather than un-rendering
+         * them keeps their own local state (in-progress chat text, an
+         * in-progress dice combo) intact for whenever the user exits. */
+        .body.map-expanded { grid-template-columns: 1fr; }
+        .body.map-expanded .col-left,
+        .body.map-expanded .col-right { display: none; }
+        .map-view-controls {
+          position: absolute;
+          top: 10px;
+          right: 10px;
+          z-index: 45;
+          display: flex;
+          gap: 8px;
+        }
+        .floating-btn {
+          background: var(--panel);
+          border: 1px solid var(--gold);
+          color: var(--gold);
+          padding: 6px 12px;
+          border-radius: 3px;
+          font-family: var(--font-mono);
+          font-size: 11px;
+          cursor: pointer;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+          white-space: nowrap;
+        }
+        .floating-btn:hover { background: var(--gold); color: var(--ink); }
+        .floating-btn.active { background: rgba(201, 162, 39, 0.15); }
       `}</style>
     </div>
   );

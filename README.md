@@ -193,6 +193,21 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
     local, per-person display preference (never synced, resets to on if you
     refresh) — turning it off doesn't touch the token's actual stored name
     in any way, just whether that one label renders on your own screen.
+  - **"Expand Map" / "Exit Map View"** (`apps/web/components/RoomView.tsx`):
+    lets one person enlarge the battle map to fill essentially the whole
+    browser window on their own screen, hiding the Dice & Controls and Chat
+    columns for them specifically. Same local-only pattern as everything
+    above (a plain `useState`, never sent over the socket — there's no
+    server code path involved at all, so it's structurally impossible for
+    this to generate any network traffic or affect anyone else's screen).
+    The side columns are hidden with CSS rather than un-rendered, so a
+    half-typed chat message or an in-progress multi-dice selection survives
+    switching in and out. The existing BattleMap component itself is
+    completely untouched — this only changes how much space its container
+    is given, the same way the initiative panel width already worked. The
+    normal Initiative button lives in the now-hidden Dice column, so a
+    small twin of it floats next to "Exit Map View" only while expanded,
+    opening the exact same (unmodified) initiative panel.
   - **Remove from Map** asks for confirmation first, then removes the token
     from the board for everyone. It's not a permanent delete — a removed
     player can be re-added via "Add Player Token," a removed monster/NPC can
