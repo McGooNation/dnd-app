@@ -51,6 +51,27 @@ export default function DiceTray({ rolls, onRoll }: Props) {
               {d}
             </button>
           ))}
+          <button
+            className={`die ${
+              addedDice.length === 1 &&
+              addedDice[0].diceType === "d10" &&
+              addedDice[0].count === 1 &&
+              diceType === "d12" &&
+              count === 1
+                ? "active"
+                : ""
+            }`}
+            onClick={() => {
+              // A convenient shortcut for exactly what "select d10, click +
+              // Add Die, select d12" already does — not a separate system,
+              // just pre-filling the same existing state those steps set.
+              setAddedDice([{ diceType: "d10", count: 1 }]);
+              setDiceType("d12");
+              setCount(1);
+            }}
+          >
+            D10 + D12
+          </button>
         </div>
 
         <div className="custom-row">
