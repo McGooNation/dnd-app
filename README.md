@@ -35,6 +35,21 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
     Mobile currently displays multi-type rolls made by others correctly,
     but building one is a web-only capability for now (mobile's dice tab
     doesn't yet have the count/modifier controls this extends).
+  - **"D10 + D12" preset button**: sits alongside the standard d4–d100
+    buttons and is purely a shortcut for the multi-die feature above —
+    clicking it pre-fills the exact same state "pick d10, click + Add Die,
+    pick d12" already would, so it rolls, displays, and saves to history
+    exactly like any other multi-die combination, through the same code.
+  - **Count and Modifier are editable on a phone browser**
+    (`apps/web/lib/useIsMobile.ts`, used only in `DiceTray.tsx`): below the
+    app's existing ~1000px breakpoint, these fields track the literal text
+    being typed, so deleting the default value can leave the field
+    genuinely empty for a moment instead of a controlled input snapping it
+    back before the next keystroke lands — the actual value used for
+    rolling never goes empty or invalid itself, only what's visibly typed
+    can be, and it's reconciled back to a valid number on blur. Desktop
+    (≥1000px) keeps its exact original input handling, untouched — this
+    mobile-only behavior lives entirely alongside it, not in place of it.
   - **Normal / Advantage / Disadvantage now work for any roll**, not just a
     single d20 — the traditional d20 case still works exactly as it always
     has, and the same idea now generalizes to any dice combination: the
@@ -115,9 +130,16 @@ the real-time/dice logic is written once and just gets different UI wrapped arou
   - On desktop (matching the same ~1000px breakpoint the three-column layout
     itself uses), the panel is sized to match the existing right-hand
     Table Talk column, not a fixed pixel width — so it overlays only that
-    area and never covers the battle map. Below that breakpoint (narrow
-    screens, where the layout is already a single stacked column), sizing is
-    unchanged from before.
+    area and never covers the battle map. **Below that breakpoint** (a phone
+    browser, where the layout is already a single stacked column instead of
+    three side by side), the panel instead opens as a bottom sheet —
+    anchored to the bottom edge, about 55% of the screen's height, so the
+    map and dice controls above it stay visible rather than the panel
+    covering nearly the whole screen the way sliding in from the side would.
+    Scrolls internally if its own contents don't fit in that height. This is
+    a CSS-only distinction (`apps/web/components/InitiativePanel.tsx`) — the
+    open/closed state itself is untouched, still the same local `useState`
+    described above.
   - Add any currently-connected player, or a custom monster/NPC entry
     (name + initiative value) — multiple custom entries can share a name
     (e.g. "Goblin 1", "Goblin 2").

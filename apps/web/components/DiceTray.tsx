@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CUSTOM_DICE_MAX_SIDES, CUSTOM_DICE_MIN_SIDES, DICE_TYPES, DiceType, RollRequest, RollResult } from "shared";
+import { useIsMobile } from "../lib/useIsMobile";
 
 interface Props {
   rolls: RollResult[];
@@ -14,9 +15,23 @@ interface Props {
 const MAX_DICE_GROUPS = 10;
 
 export default function DiceTray({ rolls, onRoll }: Props) {
+  const isMobile = useIsMobile();
   const [diceType, setDiceType] = useState<DiceType>("d20");
   const [count, setCount] = useState(1);
   const [modifier, setModifier] = useState(0);
+  // Mobile-only "what's actually typed right now" mirrors of count/modifier
+  // above. On a touch keyboard, a controlled number input that immediately
+  // re-coerces every keystroke (as the plain onChange below still does, for
+  // desktop) makes it impossible to ever see the field empty for a moment —
+  // deleting the default value snaps it right back before you can type a
+  // replacement. These hold the literal in-progress text instead, so the
+  // field can sit empty (or as a bare "-" while typing a negative modifier)
+  // while editing; count/modifier themselves only ever update once that
+  // text actually resolves to a real, valid number — so anything that
+  // constructs a roll always has a valid value to use, never an empty one,
+  // even mid-edit. Desktop's own input further down never touches these.
+  const [countInput, setCountInput] = useState("1");
+  const [modifierInput, setModifierInput] = useState("0");
   const [mode, setMode] = useState<"normal" | "advantage" | "disadvantage">("normal");
   const [customSides, setCustomSides] = useState("");
   const [customError, setCustomError] = useState<string | null>(null);
@@ -68,6 +83,7 @@ export default function DiceTray({ rolls, onRoll }: Props) {
               setAddedDice([{ diceType: "d10", count: 1 }]);
               setDiceType("d12");
               setCount(1);
+              setCountInput("1");
             }}
           >
             D10 + D12
@@ -106,16 +122,62 @@ export default function DiceTray({ rolls, onRoll }: Props) {
               type="number"
               min={1}
               max={20}
-              value={count}
-              onChange={(e) => setCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+              inputMode="numeric"
+              value={isMobile ? countInput : count}
+              onChange={(e) => {
+                if (!isMobile) {
+                  // Unchanged desktop behavior.
+                  setCount(Math.max(1, Math.min(20, Number(e.target.value) || 1)));
+                  return;
+                }
+                const raw = e.target.value;
+                setCountInput(raw); // shown as-is, even mid-edit (e.g. temporarily empty)
+                const n = parseInt(raw, 10);
+                if (raw !== "" && !isNaN(n)) {
+                  setCount(Math.max(1, Math.min(20, n)));
+                }
+              }}
+              onBlur={() => {
+                if (!isMobile) return;
+                // Whatever's actually being used for rolls is always valid
+                // already (see onChange) — this just cleans up the visible
+                // text to match it once editing is done, e.g. restoring
+                // "1" if the field was left empty.
+                setCountInput(String(count));
+              }}
             />
           </label>
           <label>
             Modifier
             <input
               type="number"
-              value={modifier}
-              onChange={(e) => setModifier(Number(e.target.value) || 0)}
+              // No inputMode override here, deliberately: inputMode="numeric"
+              // (and "decimal") are documented to hide the minus key on iOS
+              // regardless of which one is used, which would make it
+              // impossible to enter a negative modifier at all. Plain
+              // type="number" already gives a reasonable native mobile
+              // keyboard that includes a minus key on both major platforms.
+              value={isMobile ? modifierInput : modifier}
+              onChange={(e) => {
+                if (!isMobile) {
+                  // Unchanged desktop behavior.
+                  setModifier(Number(e.target.value) || 0);
+                  return;
+                }
+                const raw = e.target.value;
+                setModifierInput(raw);
+                // A bare "-" (typing toward a negative number) or an empty
+                // field are left as in-progress text without touching the
+                // actual modifier yet — only committed once they resolve to
+                // a real number, same idea as Count above.
+                if (raw !== "" && raw !== "-" && !isNaN(Number(raw))) {
+                  setModifier(Number(raw));
+                }
+              }}
+              onBlur={() => {
+                if (!isMobile) return;
+                setModifierInput(String(modifier));
+              }}
             />
           </label>
         </div>
@@ -127,6 +189,7 @@ export default function DiceTray({ rolls, onRoll }: Props) {
             onClick={() => {
               setAddedDice((prev) => [...prev, { diceType, count }]);
               setCount(1);
+              setCountInput("1");
             }}
           >
             + Add Die (combine with another type)

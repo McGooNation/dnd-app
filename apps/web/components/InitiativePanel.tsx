@@ -188,6 +188,34 @@ export default function InitiativePanel({
           }
         }
         .panel.open { transform: translateX(0); }
+        /* Mobile: opens as a bottom sheet overlaying roughly the bottom
+         * half of the screen (where Chat sits in the stacked mobile
+         * layout) instead of sliding in from the right and covering
+         * nearly the whole screen. Scrolling if the contents don't fit is
+         * already handled below by .panel-body's own overflow-y: auto —
+         * nothing extra needed for that here. Purely local UI state (see
+         * RoomView.tsx's initiativePanelOpen) — this is a CSS-only change,
+         * so it doesn't touch that at all. The desktop rule below this
+         * block is completely unaffected — it only applies at 1000px and
+         * above, well outside this one's (max-width: 999px) range. */
+        @media (max-width: 999px) {
+          .panel {
+            top: auto;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            width: 100%;
+            max-width: 100%;
+            height: 55vh;
+            max-height: 55vh;
+            border-left: none;
+            border-top: 1px solid var(--rule);
+            border-radius: 12px 12px 0 0;
+            box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.4);
+            transform: translateY(100%);
+          }
+          .panel.open { transform: translateY(0); }
+        }
         .panel-header {
           display: flex;
           align-items: flex-start;
