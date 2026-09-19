@@ -1000,7 +1000,7 @@ function InitiativeModalContent({
         <ScrollView style={{ flex: 1 }}>
           <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-end", marginBottom: 12 }}>
             <TouchableOpacity style={[styles.button, { flex: 1, marginTop: 0 }]} onPress={() => onRoll(Number(rollModifier) || 0)}>
-              <Text style={styles.buttonText}>Roll Initiative (1d20)</Text>
+              <Text style={styles.buttonText}>Roll Initiative (1d10 + 1d12)</Text>
             </TouchableOpacity>
             <View>
               <Text style={styles.modifierLabel}>MOD</Text>

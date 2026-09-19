@@ -58,7 +58,7 @@ export default function InitiativePanel({
 
       <div className="panel-body">
         <div className="roll-row">
-          <button className="roll-btn" onClick={() => onRoll(Number(rollModifier) || 0)}>Roll Initiative (1d20)</button>
+          <button className="roll-btn" onClick={() => onRoll(Number(rollModifier) || 0)}>Roll Initiative (1d10 + 1d12)</button>
           <label className="modifier-label">
             Modifier
             <input

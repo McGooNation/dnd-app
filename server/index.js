@@ -99,11 +99,13 @@ function rollOne(sides) {
 // of separate groups. Mirrors packages/shared/src/dice.ts.
 const MAX_DICE_GROUPS = 10;
 
-/** Builds the roll request used by "Roll Initiative". Always 1d20 today;
- * takes a modifier so a future Dexterity bonus from a character sheet can be
- * passed in here later without changing anything that calls this function. */
+/** Builds the roll request used by "Roll Initiative" — 1d10 + 1d12 (plus the
+ * player's typed modifier), reusing the exact same multi-die request shape
+ * (`extraDice`) the main dice roller's own "1d10 + 1d12" preset builds, so
+ * this goes through the identical executeRoll logic below, unmodified —
+ * not a second dice implementation. */
 function rollInitiativeRequest(modifier = 0) {
-  return { diceType: "d20", count: 1, modifier };
+  return { diceType: "d12", count: 1, modifier, extraDice: [{ diceType: "d10", count: 1 }] };
 }
 
 /** Rolls one complete pass over every dice group — used both for a normal
@@ -684,18 +686,26 @@ io.on("connection", (socket) => {
     // will pass its value in here the same way instead of a user-typed one.
     const safeModifier = Number.isFinite(modifier) ? Math.max(-100, Math.min(100, Math.round(modifier))) : 0;
     const request = rollInitiativeRequest(safeModifier);
-    const { rolls, total } = executeRoll(request);
+    const { rolls, total, breakdown: rollBreakdown } = executeRoll(request);
     const result = { id: uuid(), roomId, user, request, rolls, total, timestamp: Date.now() };
+    // Matches the same field the main dice roller's own multi-die rolls
+    // already carry, so this renders identically in roll history to a
+    // manually-built "1d10 + 1d12" roll — same display logic, untouched.
+    if (rollBreakdown) result.breakdown = rollBreakdown;
     if (room.lobbyId) lobbyStore.appendRoll(room.lobbyId, result);
     // Same broadcast as every other roll — the dice history behaves exactly as before.
     io.to(roomId).emit("dice:result", result);
 
     // Additionally post a readable breakdown to chat, since initiative rolls
-    // are the kind of thing a table wants to see go by in the log.
+    // are the kind of thing a table wants to see go by in the log. Joining
+    // every rolled die (rather than assuming there's exactly one) is what
+    // keeps this correct for the current 1d10 + 1d12 combination without
+    // hardcoding a die count.
+    const diceSum = rolls.join(" + ");
     const breakdown =
       safeModifier === 0
-        ? `${rolls[0]} = ${total}`
-        : `${rolls[0]} ${safeModifier > 0 ? "+" : "-"} ${Math.abs(safeModifier)} = ${total}`;
+        ? `${diceSum} = ${total}`
+        : `${diceSum} ${safeModifier > 0 ? "+" : "-"} ${Math.abs(safeModifier)} = ${total}`;
     const chatMessage = {
       id: uuid(),
       roomId,
